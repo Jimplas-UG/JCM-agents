@@ -17,9 +17,9 @@ class MarketingContentResponse(BaseModel):
     hashtags: list[str]
     status: str
     scheduled_for: datetime | None
-    metadata: dict
+    metadata: dict = Field(validation_alias="content_metadata")
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class MarketingTrendResponse(BaseModel):

@@ -28,17 +28,19 @@ setup_logging()
 logger = get_logger("agent_scheduler")
 settings = get_settings()
 
-AGENT_SCHEDULE = {
-    "infra_resilience": (InfrastructureResilienceAgent, 30),
-    "portfolio_risk": (PortfolioRiskOrchestrator, 60),
-    "execution_quality": (ExecutionQualityAgent, 120),
-    "performance_intel": (PerformanceIntelligenceAgent, 3600),
-    "research_evolution": (ResearchEvolutionAgent, 7200),
-    "ceo_copilot": (CeoCopilotAgent, 300),
-    "quant_memory": (QuantMemoryAgent, 300),
-    "explainability": (ExplainabilityAgent, 600),
-    "marketing_agent": (MarketingAgent, 86400),
-}
+def _agent_schedule() -> dict:
+    marketing_interval = max(3600, settings.marketing_cycle_hours * 3600)
+    return {
+        "infra_resilience": (InfrastructureResilienceAgent, 30),
+        "portfolio_risk": (PortfolioRiskOrchestrator, 60),
+        "execution_quality": (ExecutionQualityAgent, 120),
+        "performance_intel": (PerformanceIntelligenceAgent, 3600),
+        "research_evolution": (ResearchEvolutionAgent, 7200),
+        "ceo_copilot": (CeoCopilotAgent, 300),
+        "quant_memory": (QuantMemoryAgent, 300),
+        "explainability": (ExplainabilityAgent, 600),
+        "marketing_agent": (MarketingAgent, marketing_interval),
+    }
 
 
 async def run_agent_cycle(name: str, agent_cls: type) -> None:
@@ -61,7 +63,7 @@ async def run_agent_cycle(name: str, agent_cls: type) -> None:
 def main() -> None:
     scheduler = AsyncIOScheduler()
 
-    for name, (agent_cls, interval_seconds) in AGENT_SCHEDULE.items():
+    for name, (agent_cls, interval_seconds) in _agent_schedule().items():
         scheduler.add_job(
             run_agent_cycle,
             "interval",
@@ -72,7 +74,7 @@ def main() -> None:
         )
 
     scheduler.start()
-    logger.info("agent_scheduler_started", agents=list(AGENT_SCHEDULE.keys()))
+    logger.info("agent_scheduler_started", agents=list(_agent_schedule().keys()))
 
     try:
         asyncio.get_event_loop().run_forever()

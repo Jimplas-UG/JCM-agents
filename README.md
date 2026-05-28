@@ -10,7 +10,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full service diagram an
 
 ```
 JCM Agents/
-├── backend/                 # FastAPI + 8 supervisory agents
+├── backend/                 # FastAPI + 9 supervisory agents
 │   ├── app/
 │   │   ├── agents/          # Quant Memory, Performance Intel, Infra, Risk, etc.
 │   │   ├── api/routes/      # REST + WebSocket
@@ -46,14 +46,26 @@ JCM Agents/
 - Docker & Docker Compose
 - BSv3.2 execution layer configured to POST events to this platform
 
-### 1. Configure Environment
+### Deploy (production)
 
-```bash
-cp .env.example .env
-# Edit .env — set POSTGRES_PASSWORD, API_SECRET_KEY, EVENT_WEBHOOK_SECRET, API URLs
+**Windows Server (this VPS)** — native, no Linux Docker:
+
+```powershell
+.\scripts\pre-deploy.ps1
+.\scripts\deploy-native.ps1 -Start
+.\scripts\stop-platform.ps1    # to stop
 ```
 
-### 2. Launch Stack
+**Linux Docker hosts:**
+
+```powershell
+.\scripts\pre-deploy.ps1
+.\scripts\deploy.ps1 -Build
+```
+
+See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for full operations guide.
+
+### Manual launch
 
 ```bash
 docker compose up -d --build
@@ -174,6 +186,15 @@ See [infra/runbooks/EMERGENCY.md](infra/runbooks/EMERGENCY.md).
 | Forward Bot API | Signal delivery monitoring | Read-only |
 | Watchdog API | VPS metrics, service remediation | Read-only |
 | BSv3.2 Engine | Event webhooks | Read-only observer |
+
+## Security
+
+See [docs/SECURITY.md](docs/SECURITY.md) for production hardening, auth headers, and rate limits.
+
+```bash
+python scripts/security_check.py
+cd backend && pytest tests/ -v
+```
 
 ## Non-Negotiables
 

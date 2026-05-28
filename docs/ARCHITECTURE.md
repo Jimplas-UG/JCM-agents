@@ -24,7 +24,7 @@ flowchart TB
         Redis["Redis Pub/Sub"]
         PG["PostgreSQL"]
 
-        subgraph Agents["8 Supervisory Agents"]
+        subgraph Agents["9 Supervisory Agents"]
             QM["Quant Memory"]
             PI["Performance Intel"]
             IR["Infra Resilience"]
@@ -33,6 +33,7 @@ flowchart TB
             EX["Explainability"]
             RE["Research Evolution"]
             CEO["CEO Copilot"]
+            MK["Marketing Agent"]
         end
 
         API["FastAPI"]
@@ -58,6 +59,7 @@ flowchart TB
     EX --> PG
     RE --> PG
     CEO --> PG
+    MK --> PG
 
     Pipeline --> Redis
     Redis --> WS
@@ -89,6 +91,7 @@ flowchart TB
 | Research Evolution | Queue findings for review | Auto-deploy strategy changes |
 | Infra Resilience | Restart services via Watchdog | Modify BSv3.2 logic |
 | Explainability | Generate audit explanations | Alter trade decisions |
+| Marketing Agent | Generate brand content drafts, trend signals | Auto-publish or trade signals |
 
 ## Agent Schedule (Default)
 
@@ -102,3 +105,4 @@ flowchart TB
 | Explainability | 10min |
 | Performance Intelligence | 1hr |
 | Research Evolution | 2hr |
+| Marketing Agent | 24hr |

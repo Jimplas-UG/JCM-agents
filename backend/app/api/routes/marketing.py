@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.marketing import MarketingAgent
 from app.agents.marketing.content_engine import ContentEngine
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, verify_api_key
 from app.schemas.marketing import (
     ApproveContentRequest,
     BrandKitResponse,
@@ -52,7 +52,7 @@ async def get_trends(
     return await agent.get_trends(limit=limit)
 
 
-@router.post("/generate")
+@router.post("/generate", dependencies=[Depends(verify_api_key)])
 async def generate_content(
     body: GenerateContentRequest,
     db: AsyncSession = Depends(get_db_session),
@@ -75,7 +75,7 @@ async def generate_content(
             body=item["body"],
             hashtags=item.get("hashtags", []),
             status="draft",
-            metadata={"compliance_warnings": item.get("compliance_warnings", [])},
+            content_metadata={"compliance_warnings": item.get("compliance_warnings", [])},
         )
         db.add(row)
         await db.flush()
@@ -85,13 +85,13 @@ async def generate_content(
     return {"status": "batch_created", "count": len(rows)}
 
 
-@router.post("/cycle")
+@router.post("/cycle", dependencies=[Depends(verify_api_key)])
 async def run_marketing_cycle(db: AsyncSession = Depends(get_db_session)) -> dict:
     agent = MarketingAgent(db)
     return await agent.run_cycle()
 
 
-@router.post("/queue/{content_id}/approve")
+@router.post("/queue/{content_id}/approve", dependencies=[Depends(verify_api_key)])
 async def approve_content(
     content_id: UUID,
     body: ApproveContentRequest,
@@ -104,11 +104,11 @@ async def approve_content(
     return {
         "status": "approved",
         "id": str(row.id),
-        "warnings": (row.metadata or {}).get("compliance_warnings", []),
+        "warnings": (row.content_metadata or {}).get("compliance_warnings", []),
     }
 
 
-@router.post("/queue/{content_id}/reject")
+@router.post("/queue/{content_id}/reject", dependencies=[Depends(verify_api_key)])
 async def reject_content(
     content_id: UUID,
     db: AsyncSession = Depends(get_db_session),

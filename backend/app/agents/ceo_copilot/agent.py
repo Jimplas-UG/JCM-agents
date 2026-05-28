@@ -12,8 +12,11 @@ from app.agents.base import BaseAgent
 from app.db.redis_client import CHANNEL_DASHBOARD, publish
 from app.models.tables import (
     Alert,
+    AlertSeverity,
     CeoBriefing,
     InfraHealthLog,
+    MarketingContentQueue,
+    MarketRegime,
     PerformanceDaily,
     ResearchReviewQueue,
     ReviewStatus,
@@ -39,6 +42,15 @@ class CeoCopilotAgent(BaseAgent):
         perf = await self._latest_performance()
         alerts = await self._active_alerts()
         reviews = await self._pending_reviews()
+        marketing_drafts = await self._pending_marketing_drafts()
+
+        market_regime = "unknown"
+        if state and state.market_regime is not None:
+            market_regime = (
+                state.market_regime.value
+                if isinstance(state.market_regime, MarketRegime)
+                else str(state.market_regime)
+            )
 
         briefing = {
             "briefing_date": str(today),
@@ -47,7 +59,7 @@ class CeoCopilotAgent(BaseAgent):
                 "status": state.bsv32_status if state else "unknown",
                 "running": state.bsv32_status == "running" if state else False,
                 "nfp_blackout": state.nfp_blackout if state else False,
-                "market_regime": state.market_regime if state else "unknown",
+                "market_regime": market_regime,
             },
             "pnl": {
                 "live_pnl": float(state.floating_pnl or 0) if state else 0,
@@ -78,7 +90,11 @@ class CeoCopilotAgent(BaseAgent):
             "alerts": [
                 {
                     "id": str(a.id),
-                    "severity": a.severity,
+                    "severity": (
+                        a.severity.value
+                        if isinstance(a.severity, AlertSeverity)
+                        else str(a.severity)
+                    ),
                     "title": a.title,
                     "created_at": a.created_at.isoformat(),
                 }
@@ -89,37 +105,60 @@ class CeoCopilotAgent(BaseAgent):
                     "id": str(r.id),
                     "title": r.title,
                     "finding_type": r.finding_type,
-                    "severity": r.severity,
+                    "severity": str(r.severity),
                 }
                 for r in reviews
             ],
+            "pending_marketing_content": [
+                {
+                    "id": str(m.id),
+                    "title": m.title,
+                    "platform": m.platform,
+                    "content_type": m.content_type,
+                    "status": m.status,
+                }
+                for m in marketing_drafts
+            ],
         }
 
-        await self._persist_briefing(today, briefing, state, risk, infra, alerts, reviews)
+        await self._persist_briefing(
+            today, briefing, state, risk, infra, alerts, reviews, marketing_drafts
+        )
         return briefing
 
     async def get_dashboard_overview(self) -> dict[str, Any]:
-        briefing = await self.generate_daily_briefing()
-        bsv32 = briefing["bsv32_system"]
-        pnl = briefing["pnl"]
-        risk = briefing["risk"]
-        infra = briefing["infrastructure"]
+        """Read-only overview — no briefing persistence on dashboard poll."""
+        state = await self._latest_system_state()
+        risk = await self._latest_risk()
+        infra = await self._latest_infra()
+        alerts = await self._active_alerts()
+        reviews = await self._pending_reviews()
+        marketing_drafts = await self._pending_marketing_drafts()
+
+        market_regime = "unknown"
+        if state and state.market_regime is not None:
+            market_regime = (
+                state.market_regime.value
+                if isinstance(state.market_regime, MarketRegime)
+                else str(state.market_regime)
+            )
 
         return {
-            "bsv32_status": bsv32["status"],
-            "system_running": bsv32["running"],
-            "nfp_blackout": bsv32["nfp_blackout"],
-            "live_pnl": pnl["live_pnl"],
-            "floating_pnl": pnl["live_pnl"],
-            "daily_pnl": pnl["daily_pnl"],
-            "open_positions": pnl["open_positions"],
-            "risk_score": risk["risk_score"],
-            "market_regime": bsv32["market_regime"],
-            "infra_health_score": infra["health_score"],
-            "active_alerts": len(briefing["alerts"]),
-            "pending_reviews": len(briefing["pending_human_decisions"]),
-            "mt5_connected": infra["mt5_connected"],
-            "last_updated": datetime.now(timezone.utc).isoformat(),
+            "bsv32_status": state.bsv32_status if state else "unknown",
+            "system_running": state.bsv32_status == "running" if state else False,
+            "nfp_blackout": state.nfp_blackout if state else False,
+            "live_pnl": float(state.floating_pnl or 0) if state else 0,
+            "floating_pnl": float(state.floating_pnl or 0) if state else 0,
+            "daily_pnl": float(state.daily_pnl or 0) if state else 0,
+            "open_positions": state.open_positions if state else 0,
+            "risk_score": float(risk.risk_score or 0) if risk else 0,
+            "market_regime": market_regime,
+            "infra_health_score": self._infra_health_score(infra),
+            "active_alerts": len(alerts),
+            "pending_reviews": len(reviews),
+            "pending_marketing_drafts": len(marketing_drafts),
+            "mt5_connected": infra.mt5_connected if infra else False,
+            "last_updated": datetime.now(timezone.utc),
         }
 
     async def _latest_system_state(self) -> SystemStateSnapshot | None:
@@ -168,6 +207,15 @@ class CeoCopilotAgent(BaseAgent):
         )
         return list(result.scalars().all())
 
+    async def _pending_marketing_drafts(self) -> list[MarketingContentQueue]:
+        result = await self.db.execute(
+            select(MarketingContentQueue)
+            .where(MarketingContentQueue.status == "draft")
+            .order_by(MarketingContentQueue.created_at.desc())
+            .limit(10)
+        )
+        return list(result.scalars().all())
+
     def _infra_health_score(self, infra: InfraHealthLog | None) -> float:
         if not infra:
             return 0.0
@@ -193,6 +241,7 @@ class CeoCopilotAgent(BaseAgent):
         infra: InfraHealthLog | None,
         alerts: list,
         reviews: list,
+        marketing_drafts: list | None = None,
     ) -> None:
         existing = await self.db.execute(
             select(CeoBriefing).where(CeoBriefing.briefing_date == today)

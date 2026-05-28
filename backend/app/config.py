@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,10 +21,17 @@ class Settings(BaseSettings):
     api_secret_key: str = "change-me"
     cors_origins: str = "http://localhost:3000"
 
-    database_url: str = (
-        "postgresql+asyncpg://jcm_admin:changeme@localhost:5432/jcm_bsv32"
-    )
-    redis_url: str = "redis://localhost:6379/0"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_user: str = "jcm_admin"
+    postgres_password: str = "changeme"
+    postgres_db: str = "jcm_bsv32"
+    database_url: str = ""
+
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_password: str = ""
+    redis_url: str = ""
 
     mt5_api_url: str = "http://localhost:8081"
     mt5_api_key: str = ""
@@ -69,12 +77,55 @@ class Settings(BaseSettings):
 
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"
+    metrics_require_auth: bool = True
+    rate_limit_per_minute: int = 120
+    strict_security: bool = False
     log_level: str = "INFO"
     log_format: str = "json"
+
+    @model_validator(mode="after")
+    def assemble_connection_urls(self) -> "Settings":
+        if not self.database_url or "${" in self.database_url:
+            self.database_url = (
+                f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+                f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            )
+        if not self.redis_url or "${" in self.redis_url:
+            auth = f":{self.redis_password}@" if self.redis_password else ""
+            self.redis_url = f"redis://{auth}{self.redis_host}:{self.redis_port}/0"
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def api_auth_required(self) -> bool:
+        if self.app_env != "production":
+            return False
+        return self.api_secret_key not in ("", "change-me")
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    @property
+    def metrics_auth_required(self) -> bool:
+        if not self.prometheus_enabled or not self.metrics_require_auth:
+            return False
+        return self.is_production
+
+    def validate_production_secrets(self) -> list[str]:
+        issues: list[str] = []
+        if not self.is_production:
+            return issues
+        if self.api_secret_key in ("", "change-me"):
+            issues.append("API_SECRET_KEY must be set to a strong value in production")
+        if not self.event_webhook_secret:
+            issues.append("EVENT_WEBHOOK_SECRET must be set in production")
+        if self.postgres_password in ("", "changeme"):
+            issues.append("POSTGRES_PASSWORD must not use default in production")
+        return issues
 
 
 @lru_cache

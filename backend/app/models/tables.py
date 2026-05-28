@@ -78,6 +78,20 @@ class EventType(str, enum.Enum):
     system_state = "system_state"
 
 
+class Bsv32FilterName(str, enum.Enum):
+    nfp_blackout = "nfp_blackout"
+    yield_filter = "yield_filter"
+    dxy_filter = "dxy_filter"
+    ath_zone = "ath_zone"
+    geopolitical = "geopolitical"
+    chop_zone = "chop_zone"
+    buy_path = "buy_path"
+    risk_gating = "risk_gating"
+    watchdog = "watchdog"
+    multi_condition = "multi_condition"
+    execution_filter = "execution_filter"
+
+
 class TradeEvent(Base):
     __tablename__ = "trade_events"
 
@@ -157,14 +171,27 @@ class FilterBlockEvent(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
-    direction: Mapped[str | None] = mapped_column(String(8))
-    blocked_by: Mapped[list] = mapped_column(ARRAY(Text), nullable=False)
+    direction: Mapped[TradeDirection | None] = mapped_column(
+        Enum(TradeDirection, name="trade_direction", create_type=False)
+    )
+    blocked_by: Mapped[list] = mapped_column(
+        ARRAY(Enum(Bsv32FilterName, name="bsv32_filter_name", create_type=False)),
+        nullable=False,
+    )
     filter_states: Mapped[dict] = mapped_column(JSONB, default=dict)
-    market_regime: Mapped[str] = mapped_column(String(32), default="unknown")
-    trading_session: Mapped[str] = mapped_column(String(32), default="off_session")
+    market_regime: Mapped[MarketRegime] = mapped_column(
+        Enum(MarketRegime, name="market_regime", create_type=False),
+        default=MarketRegime.unknown,
+    )
+    trading_session: Mapped[TradingSession] = mapped_column(
+        Enum(TradingSession, name="trading_session", create_type=False),
+        default=TradingSession.off_session,
+    )
     dxy_state: Mapped[str | None] = mapped_column(String(32))
     yield_state: Mapped[str | None] = mapped_column(String(32))
-    hypothetical_outcome: Mapped[str | None] = mapped_column(String(16))
+    hypothetical_outcome: Mapped[TradeOutcome | None] = mapped_column(
+        Enum(TradeOutcome, name="trade_outcome", create_type=False)
+    )
     hypothetical_pips: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     counterfactual_evaluated: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB)
@@ -343,7 +370,10 @@ class ResearchReviewQueue(Base):
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     finding_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    severity: Mapped[str] = mapped_column(String(16), default="warning")
+    severity: Mapped[AlertSeverity] = mapped_column(
+        Enum(AlertSeverity, name="alert_severity", create_type=False),
+        default=AlertSeverity.warning,
+    )
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
     recommendation: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[ReviewStatus] = mapped_column(
@@ -417,7 +447,7 @@ class MarketingContentQueue(Base):
     scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[str] = mapped_column(String(64), default="marketing_agent")
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    content_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
 
 
 class MarketingTrendSignal(Base):

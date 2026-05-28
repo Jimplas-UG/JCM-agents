@@ -3,7 +3,7 @@
 from datetime import date
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,13 +14,14 @@ from app.agents.infra_resilience import InfrastructureResilienceAgent
 from app.agents.performance_intel import PerformanceIntelligenceAgent
 from app.agents.portfolio_risk import PortfolioRiskOrchestrator
 from app.agents.quant_memory import QuantMemoryAgent
-from app.api.deps import get_db_session
-from app.models.tables import Alert, CeoBriefing, PerformanceDaily, ResearchReviewQueue, TradeEvent
+from app.api.deps import get_db_session, verify_api_key
+from app.models.tables import Alert, CeoBriefing, PerformanceDaily, ResearchReviewQueue, ReviewStatus
 from app.schemas.events import (
     AlertResponse,
     DashboardOverview,
     PerformanceReportResponse,
     ResearchFindingResponse,
+    ResearchReviewRequest,
     TradeEventResponse,
 )
 
@@ -44,8 +45,20 @@ async def get_trades(
 
 @router.get("/risk")
 async def get_risk(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """Read latest risk snapshot — does not run a new assessment cycle."""
     agent = PortfolioRiskOrchestrator(db)
-    snapshot = await agent.assess_risk()
+    snapshot = await agent.get_latest_snapshot()
+    if not snapshot:
+        return {
+            "risk_score": 0,
+            "account_drawdown_pct": 0,
+            "daily_drawdown_pct": 0,
+            "open_positions": 0,
+            "lot_scaling_factor": 1.0,
+            "kill_switch_recommended": False,
+            "correlated_pairs": [],
+            "alerts": [],
+        }
     return {
         "risk_score": float(snapshot.risk_score or 0),
         "account_drawdown_pct": float(snapshot.account_drawdown_pct or 0),
@@ -59,11 +72,27 @@ async def get_risk(db: AsyncSession = Depends(get_db_session)) -> dict:
 
 
 @router.get("/infrastructure")
-async def get_infrastructure(db: AsyncSession = Depends(get_db_session)) -> dict:
+async def get_infrastructure(
+    live: bool = Query(False, description="Run live health checks (slower)"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     agent = InfrastructureResilienceAgent(db)
-    health = await agent.check_all_systems()
     latest = await agent.get_latest_health()
-    return {"current": health, "latest_log_id": str(latest.id) if latest else None}
+    current = None
+    if live:
+        current = await agent.check_all_systems()
+    elif latest:
+        current = {
+            "healthy": not latest.alert_triggered,
+            "services": latest.service_states or {},
+            "vps": {
+                "cpu_pct": float(latest.vps_cpu_pct or 0),
+                "ram_pct": float(latest.vps_ram_pct or 0),
+                "disk_pct": float(latest.vps_disk_pct or 0),
+            },
+            "mt5_connected": latest.mt5_connected,
+        }
+    return {"current": current, "latest_log_id": str(latest.id) if latest else None}
 
 
 @router.get("/execution-quality")
@@ -84,7 +113,7 @@ async def get_performance(
     return result.scalar_one_or_none()
 
 
-@router.post("/performance/generate")
+@router.post("/performance/generate", dependencies=[Depends(verify_api_key)])
 async def generate_performance_report(db: AsyncSession = Depends(get_db_session)) -> dict:
     agent = PerformanceIntelligenceAgent(db)
     return await agent.generate_daily_report()
@@ -101,10 +130,10 @@ async def get_audit_trail(
         {
             "id": str(a.id),
             "created_at": a.created_at.isoformat(),
-            "event_type": a.event_type,
+            "event_type": a.event_type.value if hasattr(a.event_type, "value") else a.event_type,
             "summary": a.summary,
             "human_readable": a.human_readable,
-            "severity": a.severity,
+            "severity": a.severity.value if hasattr(a.severity, "value") else a.severity,
         }
         for a in audits
     ]
@@ -123,7 +152,7 @@ async def get_alerts(
     return list(result.scalars().all())
 
 
-@router.post("/alerts/{alert_id}/acknowledge")
+@router.post("/alerts/{alert_id}/acknowledge", dependencies=[Depends(verify_api_key)])
 async def acknowledge_alert(
     alert_id: UUID,
     db: AsyncSession = Depends(get_db_session),
@@ -131,7 +160,7 @@ async def acknowledge_alert(
     result = await db.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
     if not alert:
-        return {"status": "not_found"}
+        raise HTTPException(status_code=404, detail="Alert not found")
     alert.acknowledged = True
     await db.flush()
     return {"status": "acknowledged", "id": str(alert_id)}
@@ -142,32 +171,41 @@ async def get_research_queue(
     status: str = "pending",
     db: AsyncSession = Depends(get_db_session),
 ) -> list:
+    try:
+        review_status = ReviewStatus(status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     result = await db.execute(
         select(ResearchReviewQueue)
-        .where(ResearchReviewQueue.status == status)
+        .where(ResearchReviewQueue.status == review_status)
         .order_by(ResearchReviewQueue.created_at.desc())
         .limit(50)
     )
     return list(result.scalars().all())
 
 
-@router.post("/research/{finding_id}/review")
+@router.post("/research/{finding_id}/review", dependencies=[Depends(verify_api_key)])
 async def review_finding(
     finding_id: UUID,
-    body: dict,
+    body: ResearchReviewRequest,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     from datetime import datetime, timezone
+
+    try:
+        new_status = ReviewStatus(body.status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {body.status}")
 
     result = await db.execute(
         select(ResearchReviewQueue).where(ResearchReviewQueue.id == finding_id)
     )
     finding = result.scalar_one_or_none()
     if not finding:
-        return {"status": "not_found"}
-    finding.status = body.get("status", "approved")
-    finding.reviewed_by = body.get("reviewed_by", "ceo")
-    finding.review_notes = body.get("notes", "")
+        raise HTTPException(status_code=404, detail="Finding not found")
+    finding.status = new_status
+    finding.reviewed_by = body.reviewed_by
+    finding.review_notes = body.notes
     finding.updated_at = datetime.now(timezone.utc)
     await db.flush()
     return {"status": "reviewed", "id": str(finding_id)}
@@ -175,6 +213,20 @@ async def review_finding(
 
 @router.get("/briefing")
 async def get_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """Return cached briefing for today if available; otherwise generate once."""
+    today = date.today()
+    result = await db.execute(
+        select(CeoBriefing).where(CeoBriefing.briefing_date == today)
+    )
+    row = result.scalar_one_or_none()
+    if row and row.briefing_json:
+        return row.briefing_json
+    agent = CeoCopilotAgent(db)
+    return await agent.generate_daily_briefing()
+
+
+@router.post("/briefing/generate", dependencies=[Depends(verify_api_key)])
+async def generate_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
     agent = CeoCopilotAgent(db)
     return await agent.generate_daily_briefing()
 

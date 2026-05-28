@@ -1,88 +1,73 @@
-# JCM BSv3.2 Platform - start all services on this VPS
-$ErrorActionPreference = "Continue"
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Start API, agent worker, and dashboard on Windows.
+#>
+$ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Backend = Join-Path $Root "backend"
-$Frontend = Join-Path $Root "frontend"
-$BotIntegration = Join-Path $Root "infra\bot-integration"
-$Python = Join-Path $Backend ".venv\Scripts\python.exe"
-$Npm = (Get-Command npm -ErrorAction SilentlyContinue).Source
+$LogDir = Join-Path $Root "backend\logs"
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-function Test-PortListen($port) {
-    return [bool](Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-}
-
-Write-Host "=== JCM Platform Startup ===" -ForegroundColor Cyan
-
-# Windows services
-foreach ($svc in @("postgresql-x64-17", "Memurai")) {
-    $s = Get-Service $svc -ErrorAction SilentlyContinue
-    if ($s -and $s.Status -ne "Running") {
-        Start-Service $svc
-        Write-Host "Started service: $svc"
+# Load .env into process environment
+foreach ($line in Get-Content (Join-Path $Root ".env")) {
+    if ($line -match '^\s*([^#][^=]+)=(.*)$') {
+        [Environment]::SetEnvironmentVariable($Matches[1].Trim(), $Matches[2].Trim(), "Process")
     }
 }
 
-# Sync env
-Copy-Item (Join-Path $Root ".env") (Join-Path $Backend ".env") -Force
-Copy-Item (Join-Path $Root ".env") (Join-Path $Frontend ".env.local") -Force
-
-# JCM sidecars for forward-bot + watchdog health (8083-8084); MT5/desk are Bilshenz :8765/:8791
-if (-not (Test-PortListen 8083)) {
-    & (Join-Path $BotIntegration "start-execution-layer.ps1")
-} else {
-    Write-Host "JCM sidecars already on 8083-8084"
+function Start-JcmProcess($name, $workDir, $argList, $logFile) {
+    $existing = Get-Process -Name $name -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "$name already running (PID $($existing.Id))"
+        return
+    }
+    $out = Join-Path $LogDir $logFile
+    $err = Join-Path $LogDir ($logFile -replace '\.log$', '.err.log')
+    Start-Process -FilePath "python" `
+        -ArgumentList $argList `
+        -WorkingDirectory $workDir `
+        -RedirectStandardOutput $out `
+        -RedirectStandardError $err `
+        -WindowStyle Hidden
+    Write-Host "Started $name -> $out"
 }
 
-# API (8000)
-if (-not (Test-PortListen 8000)) {
-    Start-Process -FilePath $Python -ArgumentList "-m","uvicorn","app.main:app","--host","0.0.0.0","--port","8000" `
-        -WorkingDirectory $Backend -WindowStyle Hidden
-    Write-Host "Started API on :8000"
-} else {
-    Write-Host "API already on :8000"
-}
+# API
+Start-JcmProcess "uvicorn" "$Root\backend" @(
+    "-m", "uvicorn", "app.main:app",
+    "--host", "0.0.0.0", "--port", "8000", "--workers", "1"
+) "api.log"
 
-# Agent worker
-$worker = Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
-    Where-Object { $_.CommandLine -match "agent_scheduler" }
-if (-not $worker) {
-    Start-Process -FilePath $Python -ArgumentList "-m","app.workers.agent_scheduler" `
-        -WorkingDirectory $Backend -WindowStyle Hidden
-    Write-Host "Started agent scheduler"
-} else {
-    Write-Host "Agent scheduler already running"
-}
+Start-Sleep -Seconds 3
 
-# Frontend (3000)
-if (-not (Test-PortListen 3000) -and $Npm) {
-    Start-Process -FilePath $Npm -ArgumentList "run","dev" -WorkingDirectory $Frontend -WindowStyle Hidden
-    Write-Host "Started dashboard on :3000"
-} elseif (Test-PortListen 3000) {
-    Write-Host "Dashboard already on :3000"
+# Agent scheduler (all 9 agents)
+Start-JcmProcess "agent_scheduler" "$Root\backend" @(
+    "-m", "app.workers.agent_scheduler"
+) "agents-worker.log"
+
+# Dashboard
+$feProc = Get-Process -Name "node" -ErrorAction SilentlyContinue | Where-Object {
+    $_.Path -like "*frontend*"
+}
+if (-not $feProc) {
+    $feOut = Join-Path $LogDir "frontend.log"
+    $feErr = Join-Path $LogDir "frontend.err.log"
+    Start-Process -FilePath "cmd.exe" `
+        -ArgumentList "/c", "cd /d `"$Root\frontend`" && npm start" `
+        -RedirectStandardOutput $feOut `
+        -RedirectStandardError $feErr `
+        -WindowStyle Hidden
+    Write-Host "Started dashboard -> $feOut"
 }
 
 Start-Sleep -Seconds 5
-
-Write-Host "`n=== Health ===" -ForegroundColor Cyan
 try {
-    $h = Invoke-RestMethod "http://127.0.0.1:8000/health"
-    Write-Host "API: $($h.status) | DB: $($h.database) | Redis: $($h.redis)"
+    $h = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 10
+    Write-Host "API health: $($h.status)" -ForegroundColor Green
 } catch {
-    Write-Host "API health FAILED" -ForegroundColor Red
+    Write-Host "API not responding yet - check backend\logs\api.log" -ForegroundColor Yellow
 }
 
-$ip = (
-    Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object {
-        $_.IPAddress -notlike "127.*" -and
-        $_.IPAddress -notlike "169.254.*" -and
-        $_.IPAddress -notlike "172.*"
-    } |
-    Select-Object -First 1
-).IPAddress
-if (-not $ip) { $ip = "104.194.140.203" }
-Write-Host "`nURLs (public IP: $ip):"
-Write-Host "  Dashboard:  http://${ip}:3000"
-Write-Host "  API:        http://${ip}:8000"
-Write-Host "  API Docs:   http://${ip}:8000/docs"
-Write-Host "  Webhook:    http://${ip}:8000/ingest/event"
+$pub = $env:PLATFORM_PUBLIC_URL
+if (-not $pub) { $pub = "http://localhost:8000" }
+Write-Host "Dashboard: $($pub -replace ':8000', ':3000')"

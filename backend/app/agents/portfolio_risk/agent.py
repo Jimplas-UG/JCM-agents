@@ -11,6 +11,7 @@ from app.agents.base import BaseAgent
 from app.config import get_settings
 from app.db.redis_client import cache_set
 from app.models.tables import (
+    AlertSeverity,
     RiskExposureSnapshot,
     SystemStateSnapshot,
     TradeEvent,
@@ -92,13 +93,22 @@ class PortfolioRiskOrchestrator(BaseAgent):
             alert_svc = AlertService(self.db)
             await alert_svc.create_alert(
                 agent_source=self.name,
-                severity="emergency",
+                severity=AlertSeverity.emergency.value,
                 title="Kill-Switch Recommended",
                 message="Account drawdown threshold breached. Human intervention required.",
                 metadata={"account_dd": account_dd, "daily_dd": daily_dd},
             )
 
         return snapshot
+
+    async def get_latest_snapshot(self) -> RiskExposureSnapshot | None:
+        """Read-only: latest persisted risk snapshot without running assessment."""
+        result = await self.db.execute(
+            select(RiskExposureSnapshot)
+            .order_by(RiskExposureSnapshot.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def _latest_system_state(self) -> SystemStateSnapshot | None:
         result = await self.db.execute(

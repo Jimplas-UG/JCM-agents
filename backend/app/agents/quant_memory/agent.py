@@ -10,22 +10,41 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.db.redis_client import CHANNEL_TRADE_EVENTS, publish
-from app.models.tables import FilterBlockEvent, SystemStateSnapshot, TradeEvent
+from app.models.tables import (
+    Bsv32FilterName,
+    EventType,
+    FilterBlockEvent,
+    MarketRegime,
+    SystemStateSnapshot,
+    TradeDirection,
+    TradeEvent,
+    TradeOutcome,
+    TradingSession,
+)
 from app.schemas.events import FilterBlockIngest, SystemStateIngest, TradeEventIngest
+from app.utils.enums import coerce_enum, coerce_enum_list
 
 
 class QuantMemoryAgent(BaseAgent):
     name = "quant_memory"
     description = "Records BSv3.2 trade events, filter states, and system snapshots"
 
-    async def record_trade_event(self, data: TradeEventIngest) -> TradeEvent:
+    async def record_trade_event(self, data: TradeEventIngest) -> tuple[TradeEvent, bool]:
+        existing = await self.db.execute(
+            select(TradeEvent).where(TradeEvent.event_id == data.event_id)
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            self.logger.info("trade_event_duplicate", event_id=data.event_id)
+            return found, False
+
         vps = data.vps_health
         event = TradeEvent(
             event_id=data.event_id,
-            event_type=data.event_type,
+            event_type=coerce_enum(EventType, data.event_type, EventType.trade_executed),
             created_at=data.timestamp or datetime.now(timezone.utc),
             symbol=data.symbol,
-            direction=data.direction,
+            direction=coerce_enum(TradeDirection, data.direction),
             lot_size=Decimal(str(data.lot_size)) if data.lot_size else None,
             entry_price=Decimal(str(data.entry_price)) if data.entry_price else None,
             exit_price=Decimal(str(data.exit_price)) if data.exit_price else None,
@@ -39,13 +58,15 @@ class QuantMemoryAgent(BaseAgent):
             execution_latency_ms=data.execution_latency_ms,
             pips=Decimal(str(data.pips)) if data.pips else None,
             r_multiple=Decimal(str(data.r_multiple)) if data.r_multiple else None,
-            outcome=data.outcome,
+            outcome=coerce_enum(TradeOutcome, data.outcome, TradeOutcome.open),
             pnl_usd=Decimal(str(data.pnl_usd)) if data.pnl_usd else None,
             filter_states=data.filter_states,
             filters_passed=data.filters_passed,
             filters_blocked=data.filters_blocked,
-            market_regime=data.market_regime,
-            trading_session=data.trading_session,
+            market_regime=coerce_enum(MarketRegime, data.market_regime, MarketRegime.unknown),
+            trading_session=coerce_enum(
+                TradingSession, data.trading_session, TradingSession.off_session
+            ),
             dxy_value=Decimal(str(data.dxy_value)) if data.dxy_value else None,
             dxy_state=data.dxy_state,
             yield_10y=Decimal(str(data.yield_10y)) if data.yield_10y else None,
@@ -71,18 +92,27 @@ class QuantMemoryAgent(BaseAgent):
             json.dumps({"event_id": data.event_id, "type": data.event_type, "symbol": data.symbol}),
         )
         self.logger.info("trade_event_recorded", event_id=data.event_id, symbol=data.symbol)
-        return event
+        return event, True
 
-    async def record_filter_block(self, data: FilterBlockIngest) -> FilterBlockEvent:
+    async def record_filter_block(self, data: FilterBlockIngest) -> tuple[FilterBlockEvent, bool]:
+        existing = await self.db.execute(
+            select(FilterBlockEvent).where(FilterBlockEvent.event_id == data.event_id)
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            return found, False
+
         block = FilterBlockEvent(
             event_id=data.event_id,
             created_at=data.timestamp or datetime.now(timezone.utc),
             symbol=data.symbol,
-            direction=data.direction,
-            blocked_by=data.blocked_by,
+            direction=coerce_enum(TradeDirection, data.direction),
+            blocked_by=coerce_enum_list(Bsv32FilterName, data.blocked_by),
             filter_states=data.filter_states,
-            market_regime=data.market_regime,
-            trading_session=data.trading_session,
+            market_regime=coerce_enum(MarketRegime, data.market_regime, MarketRegime.unknown),
+            trading_session=coerce_enum(
+                TradingSession, data.trading_session, TradingSession.off_session
+            ),
             dxy_state=data.dxy_state,
             yield_state=data.yield_state,
             raw_payload=data.raw_payload,
@@ -90,7 +120,7 @@ class QuantMemoryAgent(BaseAgent):
         self.db.add(block)
         await self.db.flush()
         self.logger.info("filter_block_recorded", event_id=data.event_id, blocked_by=data.blocked_by)
-        return block
+        return block, True
 
     async def record_system_state(self, data: SystemStateIngest) -> SystemStateSnapshot:
         snapshot = SystemStateSnapshot(

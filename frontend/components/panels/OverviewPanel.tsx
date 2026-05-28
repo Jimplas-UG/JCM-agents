@@ -18,6 +18,7 @@ interface Overview {
   infra_health_score: number;
   active_alerts: number;
   pending_reviews: number;
+  pending_marketing_drafts: number;
   mt5_connected: boolean;
   last_updated: string;
 }
@@ -104,6 +105,11 @@ export function OverviewPanel() {
           variant={data.active_alerts > 0 ? "warning" : "default"}
         />
         <MetricCard label="Pending Reviews" value={data.pending_reviews} />
+        <MetricCard
+          label="Marketing Drafts"
+          value={data.pending_marketing_drafts ?? 0}
+          variant={(data.pending_marketing_drafts ?? 0) > 0 ? "warning" : "default"}
+        />
       </div>
 
       <Panel title="TradingView — XAUUSD">

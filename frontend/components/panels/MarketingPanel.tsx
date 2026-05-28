@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
-import { endpoints, fetchApi } from "@/lib/api";
+import { endpoints, fetchApi, postApi } from "@/lib/api";
 
 interface ContentItem {
   id: string;
@@ -58,21 +58,22 @@ export function MarketingPanel() {
   const runCycle = async () => {
     setLoading(true);
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}${endpoints.marketingCycle}`, {
-        method: "POST",
-      });
+      await postApi(endpoints.marketingCycle);
       load();
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
   const approve = async (id: string) => {
-    await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}${endpoints.marketingApprove(id)}`,
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ approved_by: "ceo" }) }
-    );
-    load();
+    try {
+      await postApi(endpoints.marketingApprove(id), { approved_by: "ceo" });
+      load();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (

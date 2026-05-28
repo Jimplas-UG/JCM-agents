@@ -34,16 +34,24 @@ class EventPipeline:
 
         if event_type in ("trade_executed", "trade_closed"):
             data = TradeEventIngest(**payload)
-            trade = await self.memory.record_trade_event(data)
-            await self.explain.explain_trade_approved(payload)
-            await self.execution.record_from_trade(trade)
-            return {"status": "recorded", "event_id": data.event_id}
+            trade, created = await self.memory.record_trade_event(data)
+            if created:
+                await self.explain.explain_trade_approved(payload)
+                await self.execution.record_from_trade(trade)
+            return {
+                "status": "recorded" if created else "duplicate",
+                "event_id": data.event_id,
+            }
 
         if event_type == "trade_blocked":
             data = FilterBlockIngest(**payload)
-            await self.memory.record_filter_block(data)
-            await self.explain.explain_trade_blocked(payload)
-            return {"status": "blocked_recorded", "event_id": data.event_id}
+            _block, created = await self.memory.record_filter_block(data)
+            if created:
+                await self.explain.explain_trade_blocked(payload)
+            return {
+                "status": "blocked_recorded" if created else "duplicate",
+                "event_id": data.event_id,
+            }
 
         if event_type == "system_state":
             data = SystemStateIngest(**payload)

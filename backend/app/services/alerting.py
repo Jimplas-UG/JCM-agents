@@ -81,18 +81,30 @@ class AlertService:
         if not settings.alert_email_smtp_host:
             return
         try:
-            import smtplib
-            from email.mime.text import MIMEText
+            import asyncio
 
-            msg = MIMEText(message)
-            msg["Subject"] = f"[JCM Alert] {title}"
-            msg["From"] = settings.alert_email_from
-            msg["To"] = settings.alert_email_to
-
-            with smtplib.SMTP(settings.alert_email_smtp_host, settings.alert_email_smtp_port) as server:
-                server.starttls()
-                if settings.alert_email_password:
-                    server.login(settings.alert_email_from, settings.alert_email_password)
-                server.send_message(msg)
+            await asyncio.to_thread(self._send_email_sync, title, message, settings)
         except Exception as exc:
             logger.warning("email_send_failed", error=str(exc))
+
+    @staticmethod
+    def _send_email_sync(title: str, message: str, settings: object) -> None:
+        import smtplib
+        from email.mime.text import MIMEText
+
+        msg = MIMEText(message)
+        msg["Subject"] = f"[JCM Alert] {title}"
+        msg["From"] = settings.alert_email_from  # type: ignore[attr-defined]
+        msg["To"] = settings.alert_email_to  # type: ignore[attr-defined]
+
+        with smtplib.SMTP(
+            settings.alert_email_smtp_host,  # type: ignore[attr-defined]
+            settings.alert_email_smtp_port,  # type: ignore[attr-defined]
+        ) as server:
+            server.starttls()
+            if settings.alert_email_password:  # type: ignore[attr-defined]
+                server.login(
+                    settings.alert_email_from,  # type: ignore[attr-defined]
+                    settings.alert_email_password,  # type: ignore[attr-defined]
+                )
+            server.send_message(msg)

@@ -1,6 +1,6 @@
 """Health check and agent status endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from app.agents import (
     QuantMemoryAgent,
     ResearchEvolutionAgent,
 )
-from app.api.deps import get_db_session
+from app.api.deps import get_db_session, verify_api_key
 from app.db.redis_client import get_redis
 
 router = APIRouter(tags=["health"])
@@ -32,52 +32,74 @@ AGENTS = {
     "marketing_agent": MarketingAgent,
 }
 
+AGENT_DESCRIPTIONS = {
+    "quant_memory": "Records BSv3.2 trade events and system snapshots",
+    "performance_intel": "Win rate, expectancy, edge decay analytics",
+    "infra_resilience": "VPS/API health monitoring and remediation",
+    "portfolio_risk": "Exposure, correlation, drawdown assessment",
+    "execution_quality": "Slippage, spread, fill speed metrics",
+    "explainability": "Structured audit trail for BSv3.2 decisions",
+    "research_evolution": "Drift detection and human review queue",
+    "ceo_copilot": "Executive briefing and dashboard overview",
+    "marketing_agent": "Brand content drafts and trend signals",
+}
+
 
 @router.get("/health")
 async def health_check(db: AsyncSession = Depends(get_db_session)) -> dict:
     db_ok = False
     redis_ok = False
+    db_error: str | None = None
+    redis_error: str | None = None
     try:
         await db.execute(text("SELECT 1"))
         db_ok = True
-    except Exception:
-        pass
+    except Exception as exc:
+        db_error = str(exc)
     try:
         r = await get_redis()
         redis_ok = await r.ping()
-    except Exception:
-        pass
+    except Exception as exc:
+        redis_error = str(exc)
 
     status = "healthy" if db_ok and redis_ok else "degraded"
-    return {
+    result: dict = {
         "status": status,
         "database": "ok" if db_ok else "error",
         "redis": "ok" if redis_ok else "error",
         "bsv32_engine": "read-only-observer",
+        "registered_agents": len(AGENTS),
     }
+    if db_error:
+        result["database_error"] = db_error
+    if redis_error:
+        result["redis_error"] = redis_error
+    return result
 
 
 @router.get("/agents/status")
-async def agents_status(db: AsyncSession = Depends(get_db_session)) -> dict:
-    results = {}
-    for name, agent_cls in AGENTS.items():
-        agent = agent_cls(db)
-        try:
-            result = await agent.run_cycle()
-            results[name] = {"status": "ok", **result}
-        except Exception as exc:
-            results[name] = {"status": "error", "error": str(exc)}
-    return {"agents": results}
+async def agents_status() -> dict:
+    """Read-only registry — does not execute agent cycles (avoids side effects)."""
+    return {
+        "agents": {
+            name: {
+                "status": "registered",
+                "description": AGENT_DESCRIPTIONS.get(name, ""),
+                "class": agent_cls.__name__,
+            }
+            for name, agent_cls in AGENTS.items()
+        }
+    }
 
 
-@router.post("/agents/{agent_name}/run")
+@router.post("/agents/{agent_name}/run", dependencies=[Depends(verify_api_key)])
 async def run_agent(
     agent_name: str,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
     agent_cls = AGENTS.get(agent_name)
     if not agent_cls:
-        return {"status": "error", "message": f"Unknown agent: {agent_name}"}
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}")
     agent = agent_cls(db)
     result = await agent.run_cycle()
     return {"agent": agent_name, **result}

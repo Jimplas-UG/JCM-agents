@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+.env
+.env.*
+*.log
+reports/*
+!reports/.gitkeep
+logs/*
+!logs/.gitkeep
+tests
+requirements-dev.txt
+.git

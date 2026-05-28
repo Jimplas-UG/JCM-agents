@@ -82,13 +82,22 @@ class MarketingAgent(BaseAgent):
                 hashtags=item.get("hashtags", []),
                 status="draft",
                 scheduled_for=scheduled_dt,
-                metadata={
+                content_metadata={
                     "compliance_warnings": item.get("compliance_warnings", []),
                     **item.get("metadata", {}),
                 },
             )
             self.db.add(row)
             rows.append(row)
+
+        settings = get_settings()
+        if settings.marketing_auto_approve:
+            for row in rows:
+                row.status = "approved"
+                row.content_metadata = {
+                    **(row.content_metadata or {}),
+                    "approved_by": "marketing_auto_approve",
+                }
 
         await self.db.flush()
         self.logger.info("marketing_content_queued", count=len(rows))
@@ -179,10 +188,13 @@ class MarketingAgent(BaseAgent):
             return None
         warnings = validate_content(row.body)
         if warnings:
-            row.metadata = {**(row.metadata or {}), "compliance_warnings": warnings}
+            row.content_metadata = {
+                **(row.content_metadata or {}),
+                "compliance_warnings": warnings,
+            }
         row.status = "approved"
         row.updated_at = datetime.now(timezone.utc)
-        row.metadata = {**(row.metadata or {}), "approved_by": approved_by}
+        row.content_metadata = {**(row.content_metadata or {}), "approved_by": approved_by}
         await self.db.flush()
         return row
 

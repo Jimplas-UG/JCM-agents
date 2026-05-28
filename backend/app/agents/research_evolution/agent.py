@@ -8,7 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.config import get_settings
-from app.models.tables import ExecutionQualityLog, FilterBlockEvent, ResearchReviewQueue, TradeEvent
+from app.models.tables import (
+    AlertSeverity,
+    ExecutionQualityLog,
+    FilterBlockEvent,
+    ResearchReviewQueue,
+    ReviewStatus,
+    TradeEvent,
+)
+from app.utils.enums import coerce_enum
 
 
 class ResearchEvolutionAgent(BaseAgent):
@@ -193,10 +201,12 @@ class ResearchEvolutionAgent(BaseAgent):
         entry = ResearchReviewQueue(
             title=finding["title"],
             finding_type=finding["finding_type"],
-            severity=finding.get("severity", "info"),
+            severity=coerce_enum(
+                AlertSeverity, finding.get("severity", "info"), AlertSeverity.info
+            ),
             evidence=finding["evidence"],
             recommendation=finding["recommendation"],
-            status="pending",
+            status=ReviewStatus.pending,
             auto_deploy_blocked=True,
         )
         self.db.add(entry)

@@ -141,8 +141,15 @@ class DashboardOverview(BaseModel):
     infra_health_score: float
     active_alerts: int
     pending_reviews: int
+    pending_marketing_drafts: int = 0
     mt5_connected: bool
     last_updated: datetime
+
+
+class ResearchReviewRequest(BaseModel):
+    status: str = "approved"
+    reviewed_by: str = "ceo"
+    notes: str = ""
 
 
 class AlertResponse(BaseModel):

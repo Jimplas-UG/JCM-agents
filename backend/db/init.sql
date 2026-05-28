@@ -340,6 +340,8 @@ CREATE TABLE marketing_content_queue (
 
 CREATE INDEX idx_marketing_content_status ON marketing_content_queue (status, created_at DESC);
 CREATE INDEX idx_marketing_content_platform ON marketing_content_queue (platform, scheduled_for);
+CREATE INDEX idx_marketing_content_scheduled ON marketing_content_queue (scheduled_for)
+    WHERE status IN ('draft', 'approved');
 
 CREATE TABLE marketing_trend_signals (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
