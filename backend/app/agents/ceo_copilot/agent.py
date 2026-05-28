@@ -208,13 +208,17 @@ class CeoCopilotAgent(BaseAgent):
         return list(result.scalars().all())
 
     async def _pending_marketing_drafts(self) -> list[MarketingContentQueue]:
-        result = await self.db.execute(
-            select(MarketingContentQueue)
-            .where(MarketingContentQueue.status == "draft")
-            .order_by(MarketingContentQueue.created_at.desc())
-            .limit(10)
-        )
-        return list(result.scalars().all())
+        try:
+            result = await self.db.execute(
+                select(MarketingContentQueue)
+                .where(MarketingContentQueue.status == "draft")
+                .order_by(MarketingContentQueue.created_at.desc())
+                .limit(10)
+            )
+            return list(result.scalars().all())
+        except Exception as exc:
+            self.logger.warning("marketing_queue_unavailable", error=str(exc))
+            return []
 
     def _infra_health_score(self, infra: InfraHealthLog | None) -> float:
         if not infra:
