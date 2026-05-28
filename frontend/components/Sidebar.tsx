@@ -12,6 +12,7 @@ const SECTIONS = [
   { id: "execution", label: "Execution Quality" },
   { id: "reports", label: "Historical Reports" },
   { id: "alerts", label: "System Alerts" },
+  { id: "marketing", label: "Marketing" },
 ];
 
 export function Sidebar({

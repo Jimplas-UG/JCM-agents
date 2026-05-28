@@ -25,7 +25,7 @@ JCM Agents/
 └── .env.example
 ```
 
-## The 8 Supervisory Agents
+## The 9 Platform Agents
 
 | # | Agent | Role |
 |---|-------|------|
@@ -37,6 +37,7 @@ JCM Agents/
 | 6 | **Explainability** | Structured audit trail for every BSv3.2 decision |
 | 7 | **Research Evolution** | Drift detection → human review queue (no auto-deploy) |
 | 8 | **CEO Copilot** | Daily briefing, mission-control dashboard data |
+| 9 | **Marketing Agent** | JCM brand content, trends, social review queue (human approve) |
 
 ## Quick Start
 
@@ -144,6 +145,9 @@ npm run dev
 | `GET /dashboard/alerts` | Active system alerts |
 | `GET /dashboard/research` | Human review queue |
 | `GET /dashboard/briefing` | CEO daily briefing |
+| `GET /marketing/brand` | JCM brand kit |
+| `GET /marketing/queue` | Marketing content review queue |
+| `POST /marketing/cycle` | Run marketing agent cycle |
 | `WS /ws` | Real-time dashboard updates |
 | `GET /metrics` | Prometheus metrics |
 | `GET /health` | Health check |

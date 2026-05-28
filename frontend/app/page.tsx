@@ -7,6 +7,7 @@ import { AnalyticsPanel } from "@/components/panels/AnalyticsPanel";
 import { ExecutionPanel } from "@/components/panels/ExecutionPanel";
 import { InfraPanel } from "@/components/panels/InfraPanel";
 import { OverviewPanel } from "@/components/panels/OverviewPanel";
+import { MarketingPanel } from "@/components/panels/MarketingPanel";
 import { ResearchPanel } from "@/components/panels/ResearchPanel";
 import { RiskPanel } from "@/components/panels/RiskPanel";
 import { TradesPanel } from "@/components/panels/TradesPanel";
@@ -47,6 +48,8 @@ export default function MissionControl() {
             <ResearchPanel />
           </div>
         );
+      case "marketing":
+        return <MarketingPanel />;
       default:
         return <OverviewPanel />;
     }

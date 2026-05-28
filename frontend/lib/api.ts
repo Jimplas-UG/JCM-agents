@@ -23,4 +23,10 @@ export const endpoints = {
   research: "/dashboard/research",
   briefing: "/dashboard/briefing",
   health: "/health",
+  marketingBrand: "/marketing/brand",
+  marketingStats: "/marketing/stats",
+  marketingQueue: "/marketing/queue",
+  marketingTrends: "/marketing/trends",
+  marketingCycle: "/marketing/cycle",
+  marketingApprove: (id: string) => `/marketing/queue/${id}/approve`,
 };

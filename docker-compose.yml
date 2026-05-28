@@ -67,6 +67,7 @@ services:
     volumes:
       - ./backend/reports:/app/reports
       - ./backend/logs:/app/logs
+      - ./docs:/app/docs:ro
     networks:
       - jcm-net
 
@@ -89,6 +90,7 @@ services:
     volumes:
       - ./backend/reports:/app/reports
       - ./backend/logs:/app/logs
+      - ./docs:/app/docs:ro
     networks:
       - jcm-net
 

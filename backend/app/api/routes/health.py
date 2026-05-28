@@ -9,6 +9,7 @@ from app.agents import (
     ExecutionQualityAgent,
     ExplainabilityAgent,
     InfrastructureResilienceAgent,
+    MarketingAgent,
     PerformanceIntelligenceAgent,
     PortfolioRiskOrchestrator,
     QuantMemoryAgent,
@@ -28,6 +29,7 @@ AGENTS = {
     "explainability": ExplainabilityAgent,
     "research_evolution": ResearchEvolutionAgent,
     "ceo_copilot": CeoCopilotAgent,
+    "marketing_agent": MarketingAgent,
 }
 
 

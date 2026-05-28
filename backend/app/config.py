@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     research_min_sample_size: int = 30
     research_drift_window_days: int = 30
 
+    marketing_docs_path: str = "/app/docs"
+    marketing_cycle_hours: int = 24
+    marketing_auto_approve: bool = False
+
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"
     log_level: str = "INFO"

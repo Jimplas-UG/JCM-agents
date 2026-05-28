@@ -5,6 +5,9 @@ from app.models.tables import (
     ExecutionQualityLog,
     FilterBlockEvent,
     InfraHealthLog,
+    MarketingContentQueue,
+    MarketingCycleReport,
+    MarketingTrendSignal,
     PerformanceDaily,
     ResearchReviewQueue,
     RiskExposureSnapshot,
@@ -24,4 +27,7 @@ __all__ = [
     "ResearchReviewQueue",
     "Alert",
     "CeoBriefing",
+    "MarketingContentQueue",
+    "MarketingTrendSignal",
+    "MarketingCycleReport",
 ]

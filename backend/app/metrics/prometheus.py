@@ -53,6 +53,11 @@ AGENT_CYCLE_DURATION = Histogram(
     ["agent"],
 )
 
+MARKETING_CONTENT_QUEUE = Gauge(
+    "jcm_marketing_draft_count",
+    "Marketing content drafts awaiting human approval",
+)
+
 
 def metrics_response() -> bytes:
     return generate_latest()

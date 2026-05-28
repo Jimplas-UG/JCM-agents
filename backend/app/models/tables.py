@@ -395,3 +395,58 @@ class CeoBriefing(Base):
     infra_health_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
     active_alerts_count: Mapped[int] = mapped_column(Integer, default=0)
     pending_reviews: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class MarketingContentQueue(Base):
+    __tablename__ = "marketing_content_queue"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(32), default="post")
+    pillar: Mapped[str | None] = mapped_column(String(64))
+    title: Mapped[str | None] = mapped_column(String(256))
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    hashtags: Mapped[list] = mapped_column(ARRAY(Text), default=list)
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(64), default="marketing_agent")
+    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class MarketingTrendSignal(Base):
+    __tablename__ = "marketing_trend_signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    topic: Mapped[str] = mapped_column(String(128), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(64))
+    relevance_score: Mapped[Decimal | None] = mapped_column(Numeric(5, 4))
+    suggested_angle: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(64), default="marketing_agent")
+    acted_on: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MarketingCycleReport(Base):
+    __tablename__ = "marketing_cycle_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    cycle_date: Mapped[date] = mapped_column(Date, unique=True, nullable=False)
+    items_generated: Mapped[int] = mapped_column(Integer, default=0)
+    trends_scanned: Mapped[int] = mapped_column(Integer, default=0)
+    report_json: Mapped[dict] = mapped_column(JSONB, default=dict)

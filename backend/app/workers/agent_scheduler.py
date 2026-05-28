@@ -13,6 +13,7 @@ from app.agents import (
     ExecutionQualityAgent,
     ExplainabilityAgent,
     InfrastructureResilienceAgent,
+    MarketingAgent,
     PerformanceIntelligenceAgent,
     PortfolioRiskOrchestrator,
     QuantMemoryAgent,
@@ -36,6 +37,7 @@ AGENT_SCHEDULE = {
     "ceo_copilot": (CeoCopilotAgent, 300),
     "quant_memory": (QuantMemoryAgent, 300),
     "explainability": (ExplainabilityAgent, 600),
+    "marketing_agent": (MarketingAgent, 86400),
 }
 
 
