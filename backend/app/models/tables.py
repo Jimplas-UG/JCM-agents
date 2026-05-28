@@ -1,5 +1,6 @@
 """SQLAlchemy ORM models mirroring PostgreSQL schema."""
 
+import enum
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -22,6 +23,61 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.session import Base
 
 
+class ReviewStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    deferred = "deferred"
+
+
+class AlertSeverity(str, enum.Enum):
+    info = "info"
+    warning = "warning"
+    critical = "critical"
+    emergency = "emergency"
+
+
+class TradeDirection(str, enum.Enum):
+    long = "long"
+    short = "short"
+
+
+class TradeOutcome(str, enum.Enum):
+    win = "win"
+    loss = "loss"
+    breakeven = "breakeven"
+    open = "open"
+    cancelled = "cancelled"
+
+
+class MarketRegime(str, enum.Enum):
+    trending_bull = "trending_bull"
+    trending_bear = "trending_bear"
+    ranging = "ranging"
+    volatile = "volatile"
+    low_vol = "low_vol"
+    unknown = "unknown"
+
+
+class TradingSession(str, enum.Enum):
+    london = "london"
+    new_york = "new_york"
+    overlap = "overlap"
+    off_session = "off_session"
+    asia = "asia"
+
+
+class EventType(str, enum.Enum):
+    trade_executed = "trade_executed"
+    trade_blocked = "trade_blocked"
+    trade_closed = "trade_closed"
+    filter_state_change = "filter_state_change"
+    risk_parameter_change = "risk_parameter_change"
+    kill_switch = "kill_switch"
+    confidence_shift = "confidence_shift"
+    system_state = "system_state"
+
+
 class TradeEvent(Base):
     __tablename__ = "trade_events"
 
@@ -29,12 +85,16 @@ class TradeEvent(Base):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     event_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(
+        Enum(EventType, name="event_type", create_type=False), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
-    direction: Mapped[str | None] = mapped_column(String(8))
+    direction: Mapped[TradeDirection | None] = mapped_column(
+        Enum(TradeDirection, name="trade_direction", create_type=False)
+    )
     lot_size: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     entry_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
     exit_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
@@ -48,13 +108,22 @@ class TradeEvent(Base):
     execution_latency_ms: Mapped[int | None] = mapped_column(Integer)
     pips: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     r_multiple: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
-    outcome: Mapped[str] = mapped_column(String(16), default="open")
+    outcome: Mapped[TradeOutcome] = mapped_column(
+        Enum(TradeOutcome, name="trade_outcome", create_type=False),
+        default=TradeOutcome.open,
+    )
     pnl_usd: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     filter_states: Mapped[dict] = mapped_column(JSONB, default=dict)
     filters_passed: Mapped[list | None] = mapped_column(ARRAY(Text))
     filters_blocked: Mapped[list | None] = mapped_column(ARRAY(Text))
-    market_regime: Mapped[str] = mapped_column(String(32), default="unknown")
-    trading_session: Mapped[str] = mapped_column(String(32), default="off_session")
+    market_regime: Mapped[MarketRegime] = mapped_column(
+        Enum(MarketRegime, name="market_regime", create_type=False),
+        default=MarketRegime.unknown,
+    )
+    trading_session: Mapped[TradingSession] = mapped_column(
+        Enum(TradingSession, name="trading_session", create_type=False),
+        default=TradingSession.off_session,
+    )
     dxy_value: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     dxy_state: Mapped[str | None] = mapped_column(String(32))
     yield_10y: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
@@ -129,7 +198,10 @@ class SystemStateSnapshot(Base):
     floating_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     daily_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     drawdown_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
-    market_regime: Mapped[str] = mapped_column(String(32), default="unknown")
+    market_regime: Mapped[MarketRegime] = mapped_column(
+        Enum(MarketRegime, name="market_regime", create_type=False),
+        default=MarketRegime.unknown,
+    )
     raw_snapshot: Mapped[dict | None] = mapped_column(JSONB)
 
 
@@ -218,12 +290,17 @@ class AuditTrail(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_type: Mapped[EventType] = mapped_column(
+        Enum(EventType, name="event_type", create_type=False), nullable=False
+    )
     reference_id: Mapped[str | None] = mapped_column(String(64))
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     explanation_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     human_readable: Mapped[str | None] = mapped_column(Text)
-    severity: Mapped[str] = mapped_column(String(16), default="info")
+    severity: Mapped[AlertSeverity] = mapped_column(
+        Enum(AlertSeverity, name="alert_severity", create_type=False),
+        default=AlertSeverity.info,
+    )
 
 
 class PerformanceDaily(Base):
@@ -269,7 +346,10 @@ class ResearchReviewQueue(Base):
     severity: Mapped[str] = mapped_column(String(16), default="warning")
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False)
     recommendation: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), default="pending")
+    status: Mapped[ReviewStatus] = mapped_column(
+        Enum(ReviewStatus, name="review_status", create_type=False),
+        default=ReviewStatus.pending,
+    )
     reviewed_by: Mapped[str | None] = mapped_column(String(128))
     review_notes: Mapped[str | None] = mapped_column(Text)
     auto_deploy_blocked: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -286,10 +366,13 @@ class Alert(Base):
     )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     agent_source: Mapped[str] = mapped_column(String(64), nullable=False)
-    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    severity: Mapped[AlertSeverity] = mapped_column(
+        Enum(AlertSeverity, name="alert_severity", create_type=False),
+        nullable=False,
+    )
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    alert_metadata: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
     telegram_sent: Mapped[bool] = mapped_column(Boolean, default=False)
     email_sent: Mapped[bool] = mapped_column(Boolean, default=False)

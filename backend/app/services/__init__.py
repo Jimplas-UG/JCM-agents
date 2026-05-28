@@ -1,4 +1,3 @@
-from app.services.alerting import AlertService
-from app.services.event_pipeline import EventPipeline
+"""Service layer — import submodules directly to avoid circular imports."""
 
 __all__ = ["AlertService", "EventPipeline"]

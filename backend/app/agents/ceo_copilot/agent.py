@@ -16,6 +16,7 @@ from app.models.tables import (
     InfraHealthLog,
     PerformanceDaily,
     ResearchReviewQueue,
+    ReviewStatus,
     RiskExposureSnapshot,
     SystemStateSnapshot,
 )
@@ -161,7 +162,7 @@ class CeoCopilotAgent(BaseAgent):
     async def _pending_reviews(self) -> list[ResearchReviewQueue]:
         result = await self.db.execute(
             select(ResearchReviewQueue)
-            .where(ResearchReviewQueue.status == "pending")
+            .where(ResearchReviewQueue.status == ReviewStatus.pending)
             .order_by(ResearchReviewQueue.created_at.desc())
             .limit(10)
         )

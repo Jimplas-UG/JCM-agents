@@ -32,7 +32,7 @@ class AlertService:
             severity=severity,
             title=title,
             message=message,
-            metadata=metadata or {},
+            alert_metadata=metadata or {},
         )
         self.db.add(alert)
         await self.db.flush()

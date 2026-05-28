@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.base import BaseAgent
 from app.config import get_settings
 from app.db.redis_client import cache_set
-from app.models.tables import RiskExposureSnapshot, SystemStateSnapshot, TradeEvent
+from app.models.tables import (
+    RiskExposureSnapshot,
+    SystemStateSnapshot,
+    TradeEvent,
+    TradeOutcome,
+)
 from app.services.alerting import AlertService
 
 
@@ -105,7 +110,7 @@ class PortfolioRiskOrchestrator(BaseAgent):
 
     async def _open_positions(self) -> list[TradeEvent]:
         result = await self.db.execute(
-            select(TradeEvent).where(TradeEvent.outcome == "open")
+            select(TradeEvent).where(TradeEvent.outcome == TradeOutcome.open)
         )
         return list(result.scalars().all())
 
