@@ -1,19 +1,30 @@
-# Wire JCM platform to Bilshenz (C:\opt\bilshenz) and start both stacks.
+# Wire JCM platform to BSv3.2 (Bilshenz) and start both stacks.
+param(
+    [string]$Bsv32Home = ""
+)
+
 $ErrorActionPreference = "Continue"
-$JcmRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Bilshenz = "C:\opt\bilshenz"
+. "$PSScriptRoot\jcm-env.ps1"
+$JcmRoot = Get-JcmRoot -FromScript $PSScriptRoot
+$Bilshenz = Get-Bsv32Home -Root $JcmRoot -Override $Bsv32Home
 
 Write-Host "=== Wire BSv3.2 + JCM ===" -ForegroundColor Cyan
+Write-Host "BSV32_HOME: $Bilshenz" -ForegroundColor Gray
 
 # Sync JCM env to backend/frontend
 Copy-Item (Join-Path $JcmRoot ".env") (Join-Path $JcmRoot "backend\.env") -Force
-Copy-Item (Join-Path $JcmRoot ".env") (Join-Path $JcmRoot "frontend\.env.local") -Force
+$feEnv = Join-Path $JcmRoot "frontend\.env.local"
+if (Test-Path $feEnv) {
+    Copy-Item (Join-Path $JcmRoot ".env") $feEnv -Force
+}
 
-# Bilshenz execution layer
-if (Test-Path (Join-Path $Bilshenz "deploy\windows\start-all-now.ps1")) {
-    & (Join-Path $Bilshenz "deploy\windows\start-all-now.ps1") -AppDir $Bilshenz
+# BSv3.2 execution layer
+$startScript = Join-Path $Bilshenz "deploy\windows\start-all-now.ps1"
+if (Test-Path $startScript) {
+    & $startScript -AppDir $Bilshenz
 } else {
-    Write-Host "WARN: Bilshenz not found at $Bilshenz" -ForegroundColor Yellow
+    Write-Host "WARN: BSv3.2 not found at $Bilshenz" -ForegroundColor Yellow
+    Write-Host "      Set path: .\scripts\set-bsv32-home.ps1 -Path `"D:\your\BSv3.2`"" -ForegroundColor Yellow
 }
 
 # JCM platform (API, workers, dashboard, sidecars)
@@ -26,28 +37,20 @@ $checks = @(
     @{ Name = "MT5 API"; Url = "http://127.0.0.1:8765/health" },
     @{ Name = "Desk API"; Url = "http://127.0.0.1:8791/health" },
     @{ Name = "JCM API"; Url = "http://127.0.0.1:8000/health" },
-    @{ Name = "Forward sidecar"; Url = "http://127.0.0.1:8083/health"; Headers = @{ Authorization = "Bearer jcm_s930px6rvhanj7kt5qi8fy41ocdu" } },
-    @{ Name = "Watchdog sidecar"; Url = "http://127.0.0.1:8084/health"; Headers = @{ Authorization = "Bearer jcm_caxs285n7flj0t4muord1z63hgbi" } }
+    @{ Name = "Forward sidecar"; Url = "http://127.0.0.1:8083/health" },
+    @{ Name = "Watchdog sidecar"; Url = "http://127.0.0.1:8084/health" }
 )
 foreach ($c in $checks) {
     try {
-        $params = @{ Uri = $c.Url; UseBasicParsing = $true; TimeoutSec = 8 }
-        if ($c.Headers) { $params.Headers = $c.Headers }
-        $r = Invoke-WebRequest @params
+        $r = Invoke-WebRequest -Uri $c.Url -UseBasicParsing -TimeoutSec 8
         Write-Host "  $($c.Name): OK ($($r.StatusCode))"
     } catch {
         Write-Host "  $($c.Name): FAIL" -ForegroundColor Red
     }
 }
 
-$secret = "26nvWoyYBrR4GMuNZeaFLJP1OXc75Idi"
-$env:EVENT_WEBHOOK_SECRET = $secret
-$env:API_URL = "http://127.0.0.1:8000"
-$py = Join-Path $JcmRoot "backend\.venv\Scripts\python.exe"
-if (Test-Path $py) {
-    & $py (Join-Path $JcmRoot "scripts\sample_event_ingest.py")
-}
-
-Write-Host "`nDashboard: http://104.194.140.203:3000" -ForegroundColor Green
-Write-Host "JCM API:   http://104.194.140.203:8000" -ForegroundColor Green
-Write-Host "Bilshenz:  C:\opt\bilshenz (MT5 :8765, desk :8791)" -ForegroundColor Green
+$publicUrl = Get-EnvFileValue -Root $JcmRoot -Name "PLATFORM_PUBLIC_URL" -Default "http://127.0.0.1:8000"
+$dashboardUrl = $publicUrl -replace ':8000', ':3000'
+Write-Host "`nDashboard: $dashboardUrl" -ForegroundColor Green
+Write-Host "JCM API:   $publicUrl" -ForegroundColor Green
+Write-Host "BSv3.2:    $Bilshenz (MT5 :8765, desk :8791)" -ForegroundColor Green

@@ -1,15 +1,16 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+import { getApiBaseUrl, getApiKey } from "@/lib/config";
 
 function buildHeaders(json = false): HeadersInit {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (json) headers["Content-Type"] = "application/json";
-  if (API_KEY) headers["X-API-Key"] = API_KEY;
+  const apiKey = getApiKey();
+  if (apiKey) headers["X-API-Key"] = apiKey;
   return headers;
 }
 
 export async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const apiUrl = getApiBaseUrl();
+  const res = await fetch(`${apiUrl}${path}`, {
     cache: "no-store",
     headers: buildHeaders(),
   });
@@ -20,7 +21,8 @@ export async function fetchApi<T>(path: string): Promise<T> {
 }
 
 export async function postApi<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const apiUrl = getApiBaseUrl();
+  const res = await fetch(`${apiUrl}${path}`, {
     method: "POST",
     headers: buildHeaders(body !== undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,

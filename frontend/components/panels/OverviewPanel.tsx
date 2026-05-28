@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { MetricCard } from "@/components/MetricCard";
 import { Panel } from "@/components/Panel";
 import { StatusBadge } from "@/components/StatusBadge";
+import { getApiBaseUrl } from "@/lib/config";
 import { endpoints, fetchApi } from "@/lib/api";
 
 interface Overview {
@@ -43,7 +44,7 @@ export function OverviewPanel() {
     return (
       <Panel title="Overview">
         <p className="text-terminal-red text-sm">
-          API unavailable — ensure backend is running at {process.env.NEXT_PUBLIC_API_URL}
+          API unavailable — ensure backend is running at {getApiBaseUrl()}
         </p>
       </Panel>
     );

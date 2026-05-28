@@ -16,6 +16,7 @@ from app.agents import (
     ResearchEvolutionAgent,
 )
 from app.api.deps import get_db_session, verify_api_key
+from app.config import get_settings
 from app.db.redis_client import get_redis
 
 router = APIRouter(tags=["health"])
@@ -62,6 +63,7 @@ async def health_check(db: AsyncSession = Depends(get_db_session)) -> dict:
     except Exception as exc:
         redis_error = str(exc)
 
+    settings = get_settings()
     status = "healthy" if db_ok and redis_ok else "degraded"
     result: dict = {
         "status": status,
@@ -70,6 +72,8 @@ async def health_check(db: AsyncSession = Depends(get_db_session)) -> dict:
         "bsv32_engine": "read-only-observer",
         "registered_agents": len(AGENTS),
     }
+    if settings.bsv32_home:
+        result["bsv32_home"] = settings.bsv32_home
     if db_error:
         result["database_error"] = db_error
     if redis_error:

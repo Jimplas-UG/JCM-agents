@@ -58,10 +58,25 @@ Generate random secrets (PowerShell):
 | Redis | 6379 | localhost only |
 | Prometheus | 9090 | localhost only |
 
+## BSv3.2 installation folder
+
+Point JCM at your Bilshenz Strategy v3.2 directory (where `deploy\windows\start-all-now.ps1` lives):
+
+```powershell
+.\scripts\set-bsv32-home.ps1 -Path "D:\Trading\BSv3.2"
+# or edit .env directly:
+# BSV32_HOME=D:\Trading\BSv3.2
+
+.\scripts\wire-bsv32-integration.ps1
+```
+
+Default if unset: `C:\opt\bilshenz`. Override for one run: `.\scripts\wire-bsv32-integration.ps1 -Bsv32Home "D:\path"`.
+
 ## Environment variables (critical)
 
 | Variable | Purpose |
 |----------|---------|
+| `BSV32_HOME` | Path to BSv3.2 / Bilshenz install folder |
 | `PLATFORM_PUBLIC_URL` | Public API base (e.g. `http://104.194.140.203:8000`) |
 | `API_SECRET_KEY` | Admin API auth + dashboard POST actions |
 | `EVENT_WEBHOOK_SECRET` | BSv3.2 webhook header `X-Webhook-Secret` |

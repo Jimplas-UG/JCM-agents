@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     event_webhook_secret: str = ""
     event_ingestion_batch_size: int = 100
 
+    # BSv3.2 / Bilshenz installation directory (Windows path, for ops scripts and docs)
+    bsv32_home: str = ""
+
     vps_host: str = "localhost"
     infra_check_interval_seconds: int = 30
     infra_restart_max_retries: int = 3
