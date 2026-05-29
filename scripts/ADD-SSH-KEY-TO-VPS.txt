@@ -1,0 +1,10 @@
+Run this ON THE VPS (RDP or VPS console) as Administrator — one time only:
+
+powershell -Command "$k='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGxHQROjZYw7ZqHqI2oQZvAOzKnPFPxPPbvtQ50S3CzC jcm-cursor'; $dir='$env:ProgramData\ssh'; $auth='$dir\administrators_authorized_keys'; if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force }; Add-Content -Path $auth -Value $k; icacls $auth /inheritance:r /grant 'SYSTEM:(F)' /grant 'Administrators:(F)'"
+
+Also ensure OpenSSH Server is running on VPS:
+  Get-Service sshd
+  Start-Service sshd
+  Set-Service sshd -StartupType Automatic
+
+If your VPS SSH user is NOT Administrator, tell us the username and we update C:\Users\Amoskole\.ssh\config

@@ -81,6 +81,45 @@ async def health_check(db: AsyncSession = Depends(get_db_session)) -> dict:
     return result
 
 
+AGENT_INTERVALS = {
+    "infra_resilience": 30,
+    "portfolio_risk": 60,
+    "execution_quality": 120,
+    "performance_intel": 3600,
+    "research_evolution": 7200,
+    "ceo_copilot": 300,
+    "quant_memory": 300,
+    "explainability": 600,
+    "marketing_agent": 86400,
+}
+
+
+@router.get("/agents/registry")
+async def agents_registry() -> dict:
+    """List all 9 supervisory agents and their schedule (read-only, no cycle execution)."""
+    agents = []
+    for name, agent_cls in AGENTS.items():
+        interval = AGENT_INTERVALS.get(name, 0)
+        agents.append(
+            {
+                "name": name,
+                "class": agent_cls.__name__,
+                "description": getattr(agent_cls, "description", ""),
+                "interval_seconds": interval,
+                "interval_label": _format_interval(interval),
+            }
+        )
+    return {"count": len(agents), "agents": agents, "mode": "read-only-observer"}
+
+
+def _format_interval(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h"
+
+
 @router.get("/agents/status")
 async def agents_status() -> dict:
     """Read-only registry — does not execute agent cycles (avoids side effects)."""

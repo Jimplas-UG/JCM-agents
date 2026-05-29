@@ -99,6 +99,4 @@ async def root() -> dict:
         "version": __version__,
         "bsv32_mode": "read-only-observer",
         "docs": "/docs" if not settings.is_production else None,
-        "mission_control": "/mission-control",
-        "dashboard_api": "/dashboard/overview",
     }

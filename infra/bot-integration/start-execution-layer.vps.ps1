@@ -5,6 +5,10 @@ $venvPython = Join-Path $here "..\..\backend\.venv\Scripts\python.exe"
 $stub = Join-Path $here "stub_execution_layer.py"
 
 if (-not (Test-Path $venvPython)) {
+    $alt = 'C:\Users\Administrator\Documents\JCM agents\JCM-agents\backend\.venv\Scripts\python.exe'
+    if (Test-Path $alt) { $venvPython = $alt }
+}
+if (-not (Test-Path $venvPython)) {
     Write-Error "Backend venv not found. Run: cd backend; python -m venv .venv; pip install -r requirements.txt"
 }
 
@@ -22,17 +26,12 @@ foreach ($svc in $services) {
         Write-Host "Port $($svc.Port) already in use - skipping $($svc.Name)"
         continue
     }
-    $logDir = Join-Path $here "..\..\backend\logs"
-    New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-    $outLog = Join-Path $logDir "$($svc.Name)-sidecar.log"
-    $errLog = Join-Path $logDir "$($svc.Name)-sidecar.err.log"
-    Start-Process -FilePath $venvPython -ArgumentList "stub_execution_layer.py", $svc.Name `
-        -WorkingDirectory $here -WindowStyle Hidden `
-        -RedirectStandardOutput $outLog -RedirectStandardError $errLog
-    Write-Host "Started $($svc.Name) stub on port $($svc.Port) -> $outLog"
+    Start-Process -FilePath $venvPython -ArgumentList $stub, $svc.Name `
+        -WorkingDirectory $here -WindowStyle Hidden
+    Write-Host "Started $($svc.Name) stub on port $($svc.Port)"
 }
 
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 8
 
 # Load API keys from integration env
 $envFile = Join-Path $here "bsv32-forward-bot.env"
@@ -44,11 +43,15 @@ Get-Content $envFile | ForEach-Object {
 
 Write-Host "`nHealth checks (JCM sidecars):"
 foreach ($port in 8083, 8084) {
-  try {
-    $h = @{ Authorization = "Bearer $($keys[$port])" }
-    $r = Invoke-WebRequest "http://127.0.0.1:$port/health" -Headers $h -UseBasicParsing -TimeoutSec 5
-    Write-Host "  :$port -> $($r.StatusCode)"
-  } catch {
-    Write-Host "  :$port -> FAIL"
+  $ok = $false
+  1..6 | ForEach-Object {
+    if ($ok) { return }
+    Start-Sleep -Seconds 2
+    try {
+      $h = @{ Authorization = "Bearer $($keys[$port])" }
+      $r = Invoke-WebRequest "http://127.0.0.1:$port/health" -Headers $h -UseBasicParsing -TimeoutSec 5
+      if ($r.StatusCode -eq 200) { $ok = $true }
+    } catch { }
   }
+  if ($ok) { Write-Host "  :$port -> OK" } else { Write-Host "  :$port -> FAIL (check venv: fastapi uvicorn)" }
 }

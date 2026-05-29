@@ -1,0 +1,21 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "remote.SSH.remotePlatform": {
+      "jcm-vps": "windows"
+    },
+    "remote.SSH.defaultExtensions": [
+      "ms-python.python",
+      "dbaeumer.vscode-eslint"
+    ]
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-vscode-remote.remote-ssh"
+    ]
+  }
+}
