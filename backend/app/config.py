@@ -81,6 +81,9 @@ class Settings(BaseSettings):
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"
     metrics_require_auth: bool = True
+    mission_control_user: str = ""
+    mission_control_password: str = ""
+    mission_control_require_auth: bool = True
     rate_limit_per_minute: int = 120
     strict_security: bool = False
     log_level: str = "INFO"
@@ -117,6 +120,12 @@ class Settings(BaseSettings):
         if not self.prometheus_enabled or not self.metrics_require_auth:
             return False
         return self.is_production
+
+    @property
+    def mission_control_auth_required(self) -> bool:
+        if not self.mission_control_require_auth:
+            return False
+        return bool(self.mission_control_user and self.mission_control_password)
 
     def validate_production_secrets(self) -> list[str]:
         issues: list[str] = []

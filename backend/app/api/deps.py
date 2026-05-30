@@ -3,10 +3,13 @@
 import secrets
 from collections.abc import AsyncGenerator
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+
+_mission_control_basic = HTTPBasic(auto_error=False)
 from app.db.redis_client import get_redis
 from app.db.session import AsyncSessionLocal
 
@@ -64,4 +67,33 @@ async def verify_metrics_access(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Metrics endpoint requires valid X-API-Key",
+        )
+
+
+async def verify_mission_control_access(
+    credentials: HTTPBasicCredentials | None = Depends(_mission_control_basic),
+) -> None:
+    """HTTP Basic Auth for CEO Copilot dashboard — owner access only."""
+    settings = get_settings()
+    if not settings.mission_control_auth_required:
+        return
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="CEO Copilot requires authentication",
+            headers={"WWW-Authenticate": 'Basic realm="JCM CEO Copilot"'},
+        )
+    user_ok = secrets.compare_digest(
+        credentials.username.encode("utf-8"),
+        settings.mission_control_user.encode("utf-8"),
+    )
+    pass_ok = secrets.compare_digest(
+        credentials.password.encode("utf-8"),
+        settings.mission_control_password.encode("utf-8"),
+    )
+    if not (user_ok and pass_ok):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid CEO Copilot credentials",
+            headers={"WWW-Authenticate": 'Basic realm="JCM CEO Copilot"'},
         )

@@ -2,14 +2,19 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+
+from app.api.deps import verify_mission_control_access
 
 STATIC_DIR = Path(__file__).resolve().parents[2] / "static"
 MC_HTML = STATIC_DIR / "mission-control.html"
 LOGO = STATIC_DIR / "bs-logo.png"
 
-router = APIRouter(tags=["mission-control-ui"])
+router = APIRouter(
+    tags=["mission-control-ui"],
+    dependencies=[Depends(verify_mission_control_access)],
+)
 
 
 @router.get("/mission-control/logo")
