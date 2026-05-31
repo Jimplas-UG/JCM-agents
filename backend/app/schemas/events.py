@@ -119,6 +119,9 @@ class TradeEventResponse(BaseModel):
     created_at: datetime
     symbol: str
     direction: str | None
+    lot_size: Decimal | None = None
+    entry_price: Decimal | None = None
+    exit_price: Decimal | None = None
     outcome: str
     pnl_usd: Decimal | None
     market_regime: str

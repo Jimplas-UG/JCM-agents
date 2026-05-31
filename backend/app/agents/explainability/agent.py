@@ -50,6 +50,43 @@ class ExplainabilityAgent(BaseAgent):
             severity="info",
         )
 
+    async def explain_trade_closed(
+        self, payload: dict[str, Any], open_event_id: str | None = None
+    ) -> AuditTrail:
+        outcome = payload.get("outcome", "unknown")
+        pnl = payload.get("pnl_usd")
+        explanation = {
+            "decision": "trade_closed",
+            "symbol": payload.get("symbol"),
+            "direction": payload.get("direction"),
+            "outcome": outcome,
+            "pnl_usd": pnl,
+            "entry_price": payload.get("entry_price"),
+            "exit_price": payload.get("exit_price"),
+            "open_event_id": open_event_id or (payload.get("raw_payload") or {}).get(
+                "open_event_id"
+            ),
+            "mt5_ticket": (payload.get("raw_payload") or {}).get("mt5_ticket"),
+            "rationale": (
+                f"Position closed with {outcome} outcome"
+                + (f" · P&L ${pnl:.2f}" if pnl is not None else "")
+            ),
+        }
+        human = (
+            f"[CLOSED] {payload.get('symbol')} {payload.get('direction')} — {outcome.upper()}\n"
+            f"Entry: {payload.get('entry_price')} → Exit: {payload.get('exit_price')}\n"
+            f"P&L: ${pnl if pnl is not None else '—'}\n"
+            f"{explanation['rationale']}"
+        )
+        return await self._persist(
+            event_type="trade_closed",
+            reference_id=payload.get("event_id"),
+            summary=f"Trade closed: {payload.get('symbol')} {outcome} (${pnl if pnl is not None else '—'})",
+            explanation=explanation,
+            human_readable=human,
+            severity="info" if outcome != "loss" else "warning",
+        )
+
     async def explain_trade_blocked(self, payload: dict[str, Any]) -> AuditTrail:
         blocked_by = payload.get("blocked_by", [])
         explanation = {
@@ -139,6 +176,7 @@ class ExplainabilityAgent(BaseAgent):
     async def on_event(self, event_type: str, payload: dict[str, Any]) -> None:
         handlers = {
             "trade_executed": self.explain_trade_approved,
+            "trade_closed": self.explain_trade_closed,
             "trade_blocked": self.explain_trade_blocked,
             "kill_switch": self.explain_kill_switch,
             "confidence_shift": self.explain_confidence_shift,

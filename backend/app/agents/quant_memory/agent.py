@@ -30,6 +30,9 @@ class QuantMemoryAgent(BaseAgent):
     description = "Records BSv3.2 trade events, filter states, and system snapshots"
 
     async def record_trade_event(self, data: TradeEventIngest) -> tuple[TradeEvent, bool]:
+        if data.event_type == "trade_closed":
+            return await self._close_trade_event(data)
+
         existing = await self.db.execute(
             select(TradeEvent).where(TradeEvent.event_id == data.event_id)
         )
@@ -38,6 +41,9 @@ class QuantMemoryAgent(BaseAgent):
             self.logger.info("trade_event_duplicate", event_id=data.event_id)
             return found, False
 
+        return await self._insert_trade_event(data)
+
+    async def _insert_trade_event(self, data: TradeEventIngest) -> tuple[TradeEvent, bool]:
         vps = data.vps_health
         event = TradeEvent(
             event_id=data.event_id,
@@ -93,6 +99,92 @@ class QuantMemoryAgent(BaseAgent):
         )
         self.logger.info("trade_event_recorded", event_id=data.event_id, symbol=data.symbol)
         return event, True
+
+    async def _close_trade_event(self, data: TradeEventIngest) -> tuple[TradeEvent, bool]:
+        existing = await self.db.execute(
+            select(TradeEvent).where(TradeEvent.event_id == data.event_id)
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            self.logger.info("trade_close_duplicate", event_id=data.event_id)
+            return found, False
+
+        raw = data.raw_payload or {}
+        open_event_id = raw.get("open_event_id")
+        mt5_ticket = raw.get("mt5_ticket")
+        open_trade: TradeEvent | None = None
+
+        if open_event_id:
+            result = await self.db.execute(
+                select(TradeEvent).where(TradeEvent.event_id == open_event_id)
+            )
+            open_trade = result.scalar_one_or_none()
+
+        if not open_trade and mt5_ticket is not None:
+            open_rows = await self.db.execute(
+                select(TradeEvent).where(TradeEvent.outcome == TradeOutcome.open)
+            )
+            for candidate in open_rows.scalars().all():
+                rp = candidate.raw_payload or {}
+                if rp.get("mt5_ticket") == mt5_ticket:
+                    open_trade = candidate
+                    break
+
+        if not open_trade and data.symbol and data.direction:
+            direction = coerce_enum(TradeDirection, data.direction)
+            result = await self.db.execute(
+                select(TradeEvent)
+                .where(
+                    TradeEvent.symbol == data.symbol,
+                    TradeEvent.direction == direction,
+                    TradeEvent.outcome == TradeOutcome.open,
+                )
+                .order_by(TradeEvent.created_at.desc())
+                .limit(1)
+            )
+            open_trade = result.scalar_one_or_none()
+
+        if not open_trade:
+            self.logger.warning(
+                "trade_close_no_open_match",
+                event_id=data.event_id,
+                symbol=data.symbol,
+            )
+            return await self._insert_trade_event(data)
+
+        merged_raw = {**(open_trade.raw_payload or {}), **raw}
+        merged_raw["close_event_id"] = data.event_id
+        open_trade.exit_price = (
+            Decimal(str(data.exit_price)) if data.exit_price is not None else open_trade.exit_price
+        )
+        if data.pnl_usd is not None:
+            open_trade.pnl_usd = Decimal(str(data.pnl_usd))
+        if data.pips is not None:
+            open_trade.pips = Decimal(str(data.pips))
+        open_trade.outcome = coerce_enum(TradeOutcome, data.outcome, TradeOutcome.open)
+        open_trade.event_type = EventType.trade_closed
+        open_trade.raw_payload = merged_raw
+        await self.db.flush()
+
+        await publish(
+            CHANNEL_TRADE_EVENTS,
+            json.dumps(
+                {
+                    "event_id": data.event_id,
+                    "type": "trade_closed",
+                    "symbol": data.symbol,
+                    "open_event_id": open_trade.event_id,
+                }
+            ),
+        )
+        self.logger.info(
+            "trade_event_closed",
+            event_id=data.event_id,
+            open_event_id=open_trade.event_id,
+            symbol=data.symbol,
+            outcome=data.outcome,
+        )
+        return open_trade, True
 
     async def record_filter_block(self, data: FilterBlockIngest) -> tuple[FilterBlockEvent, bool]:
         existing = await self.db.execute(

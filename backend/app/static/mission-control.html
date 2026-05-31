@@ -308,6 +308,118 @@
       max-height: 280px;
       overflow-y: auto;
     }
+    .trade-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .trade-table th {
+      text-align: left;
+      color: var(--muted);
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-size: 0.62rem;
+      padding: 0.5rem 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .trade-table td {
+      padding: 0.55rem 0.35rem;
+      border-bottom: 1px solid rgba(201,162,39,.06);
+      vertical-align: middle;
+    }
+    .outcome-win { color: var(--green); font-weight: 600; }
+    .outcome-loss { color: var(--red); font-weight: 600; }
+    .outcome-open { color: var(--amber); font-weight: 600; }
+    .outcome-be { color: var(--muted); font-weight: 600; }
+    .clickable {
+      cursor: pointer;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .clickable:hover { background: rgba(201,162,39,.06); }
+    .read-hint {
+      font-size: 0.62rem;
+      color: var(--gold-dim);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.75);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border-strong);
+      border-radius: 14px;
+      max-width: 720px;
+      width: 100%;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 24px 64px rgba(0,0,0,.6);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .modal-header h2 {
+      font-family: Cinzel, serif;
+      font-size: 1.05rem;
+      color: var(--gold-light);
+      line-height: 1.35;
+    }
+    .modal-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 0.35rem;
+    }
+    .modal-close {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 6px;
+      width: 2rem;
+      height: 2rem;
+      cursor: pointer;
+      font-size: 1.1rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    .modal-close:hover { color: var(--gold-light); border-color: var(--border-strong); }
+    .modal-body {
+      padding: 1.25rem 1.5rem 1.5rem;
+      overflow-y: auto;
+      font-size: 0.88rem;
+      line-height: 1.65;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+    .modal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .modal-tags span {
+      font-size: 0.68rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      background: rgba(201,162,39,.08);
+      color: var(--gold);
+      border: 1px solid var(--border);
+    }
     @media (max-width: 768px) {
       body { flex-direction: column; }
       aside { width: 100%; }
@@ -354,6 +466,19 @@
         <a href="/health">System Health</a>
         <a href="/agents/registry">Agent Registry</a>
       </div>
+    </div>
+  </div>
+  <div id="reader-modal" class="modal-backdrop" onclick="if(event.target===this) closeReader()">
+    <div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div>
+          <h2 id="reader-title">—</h2>
+          <div id="reader-meta" class="modal-meta"></div>
+        </div>
+        <button class="modal-close" type="button" onclick="closeReader()" aria-label="Close">&times;</button>
+      </div>
+      <div id="reader-body" class="modal-body"></div>
+      <div id="reader-tags" class="modal-tags" style="padding:0 1.5rem 1.25rem;display:none"></div>
     </div>
   </div>
   <script>
@@ -404,22 +529,117 @@
       return `<div class="hero"><div class="hero-label">CEO Copilot</div><div class="hero-title">${title}</div><div class="hero-meta">${meta}</div></div>`;
     }
 
+    function outcomeClass(o) {
+      if (o === "win") return "outcome-win";
+      if (o === "loss") return "outcome-loss";
+      if (o === "open") return "outcome-open";
+      return "outcome-be";
+    }
+
+    function openReader(title, meta, body, tags) {
+      $("reader-title").textContent = title || "Untitled";
+      $("reader-meta").textContent = meta || "";
+      $("reader-body").textContent = body || "No content available.";
+      const tagEl = $("reader-tags");
+      if (tags && tags.length) {
+        tagEl.style.display = "flex";
+        tagEl.innerHTML = tags.map(t => `<span>${esc(t)}</span>`).join("");
+      } else {
+        tagEl.style.display = "none";
+        tagEl.innerHTML = "";
+      }
+      $("reader-modal").classList.add("open");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeReader() {
+      $("reader-modal").classList.remove("open");
+      document.body.style.overflow = "";
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeReader();
+    });
+
+    function clickableRow(title, subtitle, hint, onclickJs) {
+      return `<div class="row clickable" onclick="${onclickJs}">
+        <div><strong>${esc(title)}</strong><br><span class="muted">${esc(subtitle)}</span></div>
+        <span class="read-hint">${hint || "Read"}</span>
+      </div>`;
+    }
+
+    function openMktArticle(idx) {
+      const i = window.__mktQueue?.[idx];
+      if (!i) return;
+      openReader(
+        i.title || i.platform,
+        [i.platform, i.pillar, i.content_type, i.status].filter(Boolean).join(" · "),
+        i.body,
+        i.hashtags
+      );
+    }
+
+    function openResearchItem(idx) {
+      const r = window.__research?.[idx];
+      if (!r) return;
+      const body = (r.recommendation || "") + "\n\nEvidence:\n" + JSON.stringify(r.evidence || {}, null, 2);
+      openReader(r.title, [r.finding_type, r.severity].filter(Boolean).join(" · "), body);
+    }
+
+    function openAlertItem(idx) {
+      const a = window.__alerts?.[idx];
+      if (!a) return;
+      openReader(a.title, [a.severity, a.agent_source, (a.created_at || "").slice(0, 19)].filter(Boolean).join(" · "), a.message);
+    }
+
+    function openTrendItem(idx) {
+      const t = window.__mktTrends?.[idx];
+      if (!t) return;
+      openReader(t.topic, [t.category, "relevance " + fmt(t.relevance_score, 2)].filter(Boolean).join(" · "), t.suggested_angle || "No angle suggested yet.");
+    }
+
+    function tradeHistoryTable(rows) {
+      if (!rows || !rows.length) {
+        return `<p class="muted">No trades recorded yet — closed positions will appear after MT5 exit</p>`;
+      }
+      const head = `<tr><th>Time</th><th>Symbol</th><th>Dir</th><th>Outcome</th><th>Entry</th><th>Exit</th><th>P&L</th></tr>`;
+      const body = rows.map(t => {
+        const ts = (t.created_at || "").slice(0, 16).replace("T", " ");
+        const oc = t.outcome || "open";
+        const pnl = t.pnl_usd != null ? "$" + fmt(t.pnl_usd) : "—";
+        const pnlColor = oc === "win" ? "var(--green)" : oc === "loss" ? "var(--red)" : "var(--muted)";
+        return `<tr>
+          <td class="muted">${esc(ts)}</td>
+          <td>${esc(t.symbol)}</td>
+          <td>${esc(t.direction)}</td>
+          <td class="${outcomeClass(oc)}">${esc(oc)}</td>
+          <td>${fmt(t.entry_price)}</td>
+          <td>${t.exit_price != null ? fmt(t.exit_price) : "—"}</td>
+          <td style="color:${pnlColor}">${pnl}</td>
+        </tr>`;
+      }).join("");
+      return `<table class="trade-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    }
+
     async function load() {
       try {
-        const [ov, briefing, infra, risk, perf, execQ, mktStats, mktQueue, mktTrends, alerts, research, registry] = await Promise.all([
+        const [ov, briefing, infra, risk, perf, execQ, trades, mktStats, mktDraft, mktApproved, mktTrends, alerts, research, registry] = await Promise.all([
           get("/dashboard/overview"),
           get("/dashboard/briefing").catch(() => null),
           get("/dashboard/infrastructure"),
           get("/dashboard/risk").catch(() => null),
           get("/dashboard/performance").catch(() => null),
           get("/dashboard/execution-quality").catch(() => null),
+          get("/dashboard/trades?limit=40").catch(() => []),
           get("/marketing/stats").catch(() => null),
-          get("/marketing/queue?status=draft&limit=8").catch(() => []),
+          get("/marketing/queue?status=draft&limit=20").catch(() => []),
+          get("/marketing/queue?status=approved&limit=20").catch(() => []),
           get("/marketing/trends?limit=8").catch(() => []),
           get("/dashboard/alerts?limit=15").catch(() => []),
           get("/dashboard/research?status=pending").catch(() => []),
           get("/agents/registry"),
         ]);
+        const mktQueue = [...(mktDraft || []), ...(mktApproved || [])];
 
         $("bsv32-badge").textContent = `BSv3.2 ${ov.bsv32_status || "unknown"}`;
         $("bsv32-badge").className = "badge " + (ov.system_running ? "badge-ok" : "badge-warn");
@@ -490,6 +710,9 @@
           </div>`;
 
         $("analytics").innerHTML = hero("Quant Analytics", "Performance intelligence and execution quality") + `
+          <div class="block"><h3>Trade History</h3>
+            ${tradeHistoryTable(trades)}
+          </div>
           <div class="block"><h3>Performance Intelligence</h3>
             ${perf ? cards([
               ["Trades Today", perf.total_trades ?? 0],
@@ -509,7 +732,12 @@
             ["Kill Switch", risk.kill_switch_recommended ? "RECOMMENDED" : "Clear", risk.kill_switch_recommended ? "var(--red)" : "var(--green)"],
           ])}</div>` : ""}`;
 
-        $("marketing").innerHTML = hero("Marketing Intelligence", "Brand content pipeline and trend signals") + `
+        window.__mktQueue = mktQueue;
+        window.__mktTrends = mktTrends || [];
+        window.__research = research || [];
+        window.__alerts = alerts || [];
+
+        $("marketing").innerHTML = hero("Marketing Intelligence", "Brand content pipeline and trend signals · click an article to read") + `
           <div class="block"><h3>Content Pipeline</h3>
             ${mktStats ? cards([
               ["Drafts", mktStats.draft_count ?? 0],
@@ -517,10 +745,20 @@
             ]) : `<p class="muted">Marketing agent loading…</p>`}
           </div>
           <div class="block"><h3>Content Queue</h3>
-            ${(mktQueue||[]).map(i => `<div class="row"><div><strong>${esc(i.title||i.platform)}</strong><br><span class="muted">${esc(i.platform)} · ${esc(i.pillar||"")}</span></div></div>`).join("") || `<p class="muted">No drafts in queue</p>`}
+            ${(mktQueue||[]).map((i, idx) => clickableRow(
+              i.title || i.platform,
+              `${i.platform} · ${i.pillar || i.content_type || ""} · ${i.status || "draft"}`,
+              "Read article",
+              `openMktArticle(${idx})`
+            )).join("") || `<p class="muted">No content in queue</p>`}
           </div>
           <div class="block"><h3>Trend Signals</h3>
-            ${(mktTrends||[]).map(t => `<div class="row"><div>${esc(t.topic)}<br><span class="muted">${esc(t.suggested_angle||"")}</span></div><span class="muted">${fmt(t.relevance_score,2)}</span></div>`).join("") || `<p class="muted">No trends detected yet</p>`}
+            ${(mktTrends||[]).map((t, idx) => clickableRow(
+              t.topic,
+              t.suggested_angle || t.category || "",
+              "Read",
+              `openTrendItem(${idx})`
+            )).join("") || `<p class="muted">No trends detected yet</p>`}
           </div>`;
 
         $("agents").innerHTML = hero("Agent Network", `${registry.count} supervisory agents · read-only observer mode`) + `
@@ -532,12 +770,22 @@
               </div>`).join("")}
           </div>`;
 
-        $("alerts").innerHTML = hero("Alerts & Research", "System alerts and quant research queue") + `
+        $("alerts").innerHTML = hero("Alerts & Research", "System alerts and quant research · click to read full detail") + `
           <div class="block"><h3>Active Alerts (${(alerts||[]).length})</h3>
-            ${(alerts||[]).map(a => `<div class="row"><div><strong>${esc(a.title)}</strong><br><span class="muted">${esc(a.severity)} · ${esc(a.created_at?.slice(0,19))}</span></div></div>`).join("") || `<p class="muted">No active alerts</p>`}
+            ${(alerts||[]).map((a, idx) => clickableRow(
+              a.title,
+              `${a.severity} · ${(a.created_at||"").slice(0,19)}`,
+              "Read",
+              `openAlertItem(${idx})`
+            )).join("") || `<p class="muted">No active alerts</p>`}
           </div>
           <div class="block"><h3>Research Queue (${(research||[]).length})</h3>
-            ${(research||[]).map(r => `<div class="row"><div><strong>${esc(r.title)}</strong><br><span class="muted">${esc(r.finding_type)} · ${esc(r.severity)}</span></div></div>`).join("") || `<p class="muted">No pending research</p>`}
+            ${(research||[]).map((r, idx) => clickableRow(
+              r.title,
+              `${r.finding_type} · ${r.severity}`,
+              "Read",
+              `openResearchItem(${idx})`
+            )).join("") || `<p class="muted">No pending research</p>`}
           </div>`;
 
         $("status").textContent = "Sync " + new Date().toLocaleTimeString();

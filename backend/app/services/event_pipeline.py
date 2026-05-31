@@ -32,7 +32,7 @@ class EventPipeline:
     async def ingest(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         logger.info("event_ingested", event_type=event_type)
 
-        if event_type in ("trade_executed", "trade_closed"):
+        if event_type == "trade_executed":
             data = TradeEventIngest(**payload)
             trade, created = await self.memory.record_trade_event(data)
             if created:
@@ -41,6 +41,18 @@ class EventPipeline:
             return {
                 "status": "recorded" if created else "duplicate",
                 "event_id": data.event_id,
+            }
+
+        if event_type == "trade_closed":
+            data = TradeEventIngest(**payload)
+            trade, created = await self.memory.record_trade_event(data)
+            if created:
+                await self.explain.explain_trade_closed(payload, trade.event_id)
+                await self.execution.record_from_trade(trade)
+            return {
+                "status": "closed" if created else "duplicate",
+                "event_id": data.event_id,
+                "open_event_id": trade.event_id,
             }
 
         if event_type == "trade_blocked":
