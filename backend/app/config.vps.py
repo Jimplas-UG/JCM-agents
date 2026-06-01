@@ -76,6 +76,12 @@ class Settings(BaseSettings):
 
     marketing_docs_path: str = "/app/docs"
     marketing_cycle_hours: int = 24
+
+    executive_briefing_timezone: str = "Africa/Kampala"
+    executive_briefing_hour: int = 9
+    executive_briefing_minute: int = 0
+    executive_briefing_ceo_name: str = "Billy Jimplas"
+    executive_briefing_run_agents_before: bool = True
     marketing_auto_approve: bool = False
 
     prometheus_enabled: bool = True

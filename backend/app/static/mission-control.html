@@ -170,6 +170,10 @@
     .badge-warn { background: rgba(251,191,36,.1); color: var(--amber); border-color: rgba(251,191,36,.3); }
     .badge-err { background: rgba(248,113,113,.1); color: var(--red); border-color: rgba(248,113,113,.3); }
     .badge-gold { background: rgba(201,162,39,.12); color: var(--gold-light); border-color: var(--border-strong); }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 0.5rem; }
+    .data-table th, .data-table td { border: 1px solid var(--border); padding: 0.45rem 0.6rem; text-align: left; }
+    .data-table th { color: var(--gold-light); font-weight: 600; }
+    .briefing-agent { margin-bottom: 1rem; }
     .content { padding: 1.75rem 2rem 2.5rem; max-width: 1200px; width: 100%; }
     .section { display: none; animation: fadeIn 0.35s ease; }
     .section.active { display: block; }
@@ -529,6 +533,93 @@
       return `<div class="hero"><div class="hero-label">CEO Copilot</div><div class="hero-title">${title}</div><div class="hero-meta">${meta}</div></div>`;
     }
 
+    function missionBadge(st) {
+      const s = (st || "GREEN").toUpperCase();
+      const cls = s === "RED" ? "badge-err" : s === "YELLOW" ? "badge-warn" : "badge-ok";
+      return `<span class="badge ${cls}">${s}</span>`;
+    }
+
+    function renderExecutiveBriefing(b) {
+      const eb = b.executive_briefing || b;
+      const v = eb.format_version >= 2 ? eb : null;
+      if (!v) {
+        return hero(`Executive Briefing · ${esc(b.briefing_date)}`, `Generated ${esc(b.generated_at?.slice(0,19))} UTC`) + `
+          <div class="block"><p class="muted">Legacy briefing format — regenerate via CEO Copilot cycle.</p></div>`;
+      }
+      let html = hero(
+        "JCM Mission Control · Daily Executive Briefing",
+        `Prepared for Billy Jimplas, CEO · ${esc(v.briefing_date)} · ${missionBadge(v.mission_status)}`
+      );
+      html += `<div class="block"><h3>Executive Summary</h3>`;
+      (v.executive_summary || []).forEach(p => {
+        html += `<p style="margin:.65rem 0;line-height:1.55;color:var(--text)">${esc(p)}</p>`;
+      });
+      html += `</div>`;
+
+      (v.agent_reports || []).forEach(ar => {
+        html += `<div class="block briefing-agent"><h3>${esc(ar.agent_name)} ${missionBadge(ar.mission_status)}</h3>`;
+        html += `<p class="muted" style="margin-bottom:.5rem"><strong>Key events</strong></p><ul>`;
+        (ar.key_events || []).forEach(e => { if (e) html += `<li>${esc(e)}</li>`; });
+        html += `</ul>`;
+        const pa = ar.performance_analysis || {};
+        ["wins","losses","bottlenecks","trends"].forEach(k => {
+          const items = (pa[k] || []).filter(Boolean);
+          if (items.length) html += `<p class="muted"><strong>${k}:</strong> ${esc(items.join(" · "))}</p>`;
+        });
+        if ((ar.opportunities || []).length) {
+          html += `<p class="muted" style="margin-top:.5rem"><strong>Opportunities</strong></p><ul>`;
+          ar.opportunities.forEach(o => { html += `<li>${esc(o)}</li>`; });
+          html += `</ul>`;
+        }
+        if ((ar.ceo_decisions_required || []).length) {
+          html += `<p style="margin-top:.5rem"><strong>CEO decisions required</strong></p><ul>`;
+          ar.ceo_decisions_required.forEach(d => { html += `<li>${esc(d)}</li>`; });
+          html += `</ul>`;
+        }
+        html += `</div>`;
+      });
+
+      const syn = v.ceo_strategic_synthesis || {};
+      html += `<div class="block"><h3>CEO Strategic Synthesis</h3>`;
+      Object.entries(syn).forEach(([k, val]) => {
+        if (val) html += `<p style="margin:.5rem 0"><strong>${esc(k.replace(/_/g," "))}:</strong> ${esc(val)}</p>`;
+      });
+      html += `</div>`;
+
+      const board = v.ceo_action_board || [];
+      if (board.length) {
+        html += `<div class="block"><h3>CEO Action Board</h3><table class="data-table"><thead><tr><th>P</th><th>Action</th><th>Owner</th><th>Deadline</th><th>Impact</th></tr></thead><tbody>`;
+        board.forEach(row => {
+          html += `<tr><td>${row.priority}</td><td>${esc(row.action)}</td><td>${esc(row.owner)}</td><td>${esc(row.deadline)}</td><td>${esc(row.impact)}</td></tr>`;
+        });
+        html += `</tbody></table></div>`;
+      }
+
+      const dec = v.ceo_decision_board || [];
+      html += `<div class="block"><h3>Decisions Billy Must Make Today</h3>`;
+      if (!dec.length) html += `<p class="muted">No mandatory decisions flagged today.</p>`;
+      dec.forEach((d, i) => {
+        html += `<div class="row" style="flex-direction:column;align-items:flex-start;gap:.35rem">
+          <strong>${i+1}. ${esc(d.decision)}</strong>
+          <span class="muted">${esc(d.why_it_matters)}</span>
+          <span>Recommendation: ${esc(d.recommendation)}</span>
+        </div>`;
+      });
+      html += `</div>`;
+
+      const cmd = v.commander_assessment || {};
+      html += `<div class="block"><h3>Mission Control Commander Assessment</h3>`;
+      html += `<p><em>If I were CEO today, these are the 3 actions I would take immediately:</em></p><ol>`;
+      (cmd.immediate_actions || []).forEach(a => { html += `<li>${esc(a)}</li>`; });
+      html += `</ol><p style="margin-top:.75rem">${esc(cmd.reasoning || "")}</p></div>`;
+
+      if (v.rendered_markdown) {
+        html += `<div class="block"><button type="button" class="read-hint" style="cursor:pointer;border:1px solid var(--border);padding:.5rem 1rem;background:transparent;color:var(--gold-light)" onclick="openReader('Full briefing (text)','${esc(v.briefing_date)}', document.getElementById('briefing-md-store').textContent)">Open printable briefing</button></div>`;
+        html += `<pre id="briefing-md-store" style="display:none">${esc(v.rendered_markdown)}</pre>`;
+      }
+      return html;
+    }
+
     function outcomeClass(o) {
       if (o === "win") return "outcome-win";
       if (o === "loss") return "outcome-loss";
@@ -660,19 +751,16 @@
         if (briefing) {
           const b = briefing;
           const perfBase = b.performance_vs_baseline || {};
-          $("executive").innerHTML = hero(`Executive Briefing · ${esc(b.briefing_date)}`, `Generated ${esc(b.generated_at?.slice(0,19))} UTC`) + `
-            <div class="block"><h3>Financial Position</h3>
+          $("executive").innerHTML = renderExecutiveBriefing(b) + `
+            <div class="block"><h3>Financial Snapshot</h3>
               ${cards([
                 ["Live P&L", "$"+fmt(b.pnl?.live_pnl), (b.pnl?.live_pnl||0)>=0?"var(--green)":"var(--red)"],
                 ["Daily P&L", "$"+fmt(b.pnl?.daily_pnl)],
                 ["Account Equity", "$"+fmt(b.pnl?.account_equity)],
                 ["Risk Score", fmt(b.risk?.risk_score,1)],
                 ["Drawdown", fmt(b.risk?.drawdown_pct,1)+"%"],
-                ["Infra Score", fmt(b.infrastructure?.health_score,0)+"%"],
+                ["Infra Score", fmt((b.infrastructure?.health_score||0)*100,0)+"%"],
               ])}
-            </div>
-            <div class="block"><h3>Pending Executive Decisions</h3>
-              ${(b.pending_human_decisions||[]).map(d => `<div class="row"><div><strong>${esc(d.title)}</strong><br><span class="muted">${esc(d.finding_type)}</span></div>${badge(false,d.severity||"review")}</div>`).join("") || `<p class="muted">No items requiring your decision</p>`}
             </div>`;
           $("regime").innerHTML = hero("Market Regime Analysis", "BSv3.2 regime classification and baseline performance") + `
             <div class="block"><h3>Current Regime</h3>

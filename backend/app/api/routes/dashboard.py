@@ -227,6 +227,14 @@ async def get_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
 
 @router.post("/briefing/generate", dependencies=[Depends(verify_api_key)])
 async def generate_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """Force full executive briefing (all 9 agents refresh, then CEO document)."""
+    from app.workers.agent_scheduler import run_daily_executive_briefing
+
+    await run_daily_executive_briefing()
+    result = await db.execute(select(CeoBriefing).where(CeoBriefing.briefing_date == date.today()))
+    row = result.scalar_one_or_none()
+    if row and row.briefing_json:
+        return row.briefing_json
     agent = CeoCopilotAgent(db)
     return await agent.generate_daily_briefing()
 
