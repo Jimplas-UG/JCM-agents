@@ -24,21 +24,23 @@ if ($existing) {
 
 Copy-Item (Join-Path $Root ".env") (Join-Path $Backend ".env") -Force -EA SilentlyContinue
 
-$cmd = @"
+$runner = "C:\Users\Administrator\jcm-scheduler-keepalive.ps1"
+@"
 Set-Location '$Backend'
 `$env:PYTHONUNBUFFERED='1'
-& '$py' -m app.workers.agent_scheduler 2>&1 | Tee-Object -FilePath '$Log' -Append
-"@
-$tmp = Join-Path $env:TEMP "jcm-agent-scheduler-runner.ps1"
-Set-Content -Path $tmp -Value $cmd -Encoding UTF8
+while (`$true) {
+    & '$py' -m app.workers.agent_scheduler 2>&1 | Tee-Object -FilePath '$Log' -Append
+    Start-Sleep -Seconds 10
+}
+"@ | Set-Content -Path $runner -Encoding UTF8
 
 Start-Process powershell -WindowStyle Hidden -ArgumentList @(
-    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $tmp
+    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $runner
 ) | Out-Null
 
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 6
 $proc = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object {
-    $_.CommandLine -match "app\.workers\.agent_scheduler"
+    $_.CommandLine -match "agent_scheduler|jcm-scheduler-keepalive"
 }
 if ($proc) {
     Write-Host "OK agent_scheduler started PID $($proc.ProcessId)" -ForegroundColor Green

@@ -6,7 +6,9 @@ try {
     Write-Host "API: $($h.status) db=$($h.database) redis=$($h.redis)"
 } catch { Write-Host "API FAIL: $_" -ForegroundColor Red }
 
-$sched = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object { $_.CommandLine -match "app\.workers\.agent_scheduler" }
+$sched = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object {
+    $_.CommandLine -match "agent_scheduler|jcm-scheduler-keepalive"
+}
 Write-Host "Agent scheduler: $(if ($sched) { 'RUNNING PID ' + $sched.ProcessId } else { 'NOT RUNNING' })"
 
 $fwd = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object { $_.CommandLine -match "run-forward-demo" }
