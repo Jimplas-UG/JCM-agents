@@ -82,6 +82,14 @@ flowchart TB
 4. **Redis pub/sub** pushes real-time updates to WebSocket clients
 5. **CEO Dashboard** polls REST endpoints and subscribes to WebSocket for live panels
 
+## Mission Control (not WordPress)
+
+**JCM Mission Control** is the only executive dashboard. It is served by the JCM FastAPI app on the VPS (for example `http://104.194.140.203:8000/mission-control`). All nine agents, daily CEO briefings, marketing drafts, and BSv3.2 webhooks write to **PostgreSQL and Mission Control** — nothing is pushed to WordPress.
+
+- Open Mission Control directly in the browser (owner auth on the VPS).
+- **Do not** install WordPress CEO Copilot plugins or run `install-wordpress-ceo-copilot.ps1` — that path is retired.
+- `jimplascapital.com` (WordPress) is the public marketing site only; it is not wired to agent data.
+
 ## Non-Negotiable Boundaries
 
 | Component | Can Do | Cannot Do |
