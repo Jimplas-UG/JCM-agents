@@ -34,7 +34,7 @@ class MarketingAgent(BaseAgent):
 
     async def run_cycle(self) -> dict[str, Any]:
         trends = await self.scan_trends()
-        generated = await self.generate_and_queue_weekly()
+        generated = await self.generate_and_queue_daily()
         report = await self._persist_cycle_report(trends, generated)
 
         await publish(
@@ -53,11 +53,22 @@ class MarketingAgent(BaseAgent):
             "report_date": str(report.cycle_date),
         }
 
-    async def generate_and_queue_weekly(self) -> list[MarketingContentQueue]:
-        batch = self.engine.generate_weekly_batch()
+    async def _already_queued_cycle_key(self, cycle_key: str) -> bool:
+        result = await self.db.execute(
+            select(MarketingContentQueue.id).where(
+                MarketingContentQueue.content_metadata["cycle_key"].as_string() == cycle_key
+            ).limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _queue_batch_items(self, batch: list[dict]) -> list[MarketingContentQueue]:
         rows: list[MarketingContentQueue] = []
 
         for item in batch:
+            cycle_key = (item.get("metadata") or {}).get("cycle_key")
+            if cycle_key and await self._already_queued_cycle_key(cycle_key):
+                continue
+
             existing = await self.db.execute(
                 select(MarketingContentQueue).where(
                     MarketingContentQueue.title == item["title"],
@@ -102,6 +113,15 @@ class MarketingAgent(BaseAgent):
         await self.db.flush()
         self.logger.info("marketing_content_queued", count=len(rows))
         return rows
+
+    async def generate_and_queue_daily(self, cycle_date: date | None = None) -> list[MarketingContentQueue]:
+        """Queue rotating LinkedIn + X + Instagram drafts for the given day (idempotent per cycle_key)."""
+        batch = self.engine.generate_daily_batch(cycle_date)
+        return await self._queue_batch_items(batch)
+
+    async def generate_and_queue_weekly(self) -> list[MarketingContentQueue]:
+        batch = self.engine.generate_weekly_batch()
+        return await self._queue_batch_items(batch)
 
     async def scan_trends(self) -> list[MarketingTrendSignal]:
         signals: list[MarketingTrendSignal] = []

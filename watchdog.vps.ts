@@ -84,13 +84,48 @@ async function probe(url: string): Promise<{ ok: boolean; detail: string }> {
     let ok = res.ok;
     if (url.includes('/api/status') && res.ok) {
       try {
-        const j = JSON.parse(text) as { connected?: boolean };
-        ok = Boolean(j.connected);
+        const j = JSON.parse(text) as {
+          connected?: boolean;
+          terminal_trade_allowed?: boolean;
+          trade_allowed?: boolean;
+          account?: { trade_allowed?: boolean };
+        };
+        const connected = Boolean(j.connected);
+        const terminalTrade = !!j.terminal_trade_allowed;
+        const accountTrade = !!(j.trade_allowed ?? j.account?.trade_allowed);
+        ok = connected && terminalTrade && accountTrade;
+        if (connected && !terminalTrade) {
+          return {
+            ok: false,
+            detail: 'connected but AutoTrading disabled (retcode 10027 risk)',
+          };
+        }
       } catch { ok = false; }
     }
     return { ok, detail: text.slice(0, 200) };
   } catch (e) {
     return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Restart MT5 terminal when algo trading is off but process is running. */
+function ensureAlgoTradingEnabled(): void {
+  try {
+    const result = runPs("(Get-Process terminal64 -ErrorAction SilentlyContinue).Id");
+    if (!result?.match(/\d+/)) return;
+    const detail = runPs(
+      `(Invoke-RestMethod '${MT5}/api/status' -TimeoutSec 8).terminal_trade_allowed`
+    );
+    if (detail.toLowerCase() === 'true') return;
+    log('AutoTrading disabled — restarting terminal64 with /algotrading');
+    runPs('taskkill /f /im terminal64.exe 2>$null');
+    runPs('Start-Sleep 8');
+    const exe = `${MT5_TERMINAL_PATH}\\terminal64.exe`;
+    runPs(`Start-Process '${exe}' -ArgumentList '/algotrading'`);
+    runPs('Start-Sleep 45');
+    logReconnect('terminal64 restarted for AutoTrading', { service: 'terminal64', reason: 'algo_trading_off' });
+  } catch (e) {
+    log(`ensureAlgoTrading error: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
@@ -157,6 +192,7 @@ function restartMt5FullStack(reason: string): void {
 
 async function tick(): Promise<void> {
   ensureTerminal64();
+  ensureAlgoTradingEnabled();
 
   const desk = await probe(DESK);
   const mt5 = await probe(`${MT5}/api/status`);

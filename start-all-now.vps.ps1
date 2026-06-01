@@ -40,8 +40,8 @@ $mt5 = $env:MT5_TERMINAL_PATH
 if (-not $mt5) { $mt5 = 'C:\Program Files\MetaTrader 5 Exness' }
 if (Test-Path (Join-Path $mt5 'terminal64.exe')) {
   if (-not (Get-Process terminal64 -EA SilentlyContinue)) {
-    Start-Process (Join-Path $mt5 'terminal64.exe')
-    Start-Sleep 15
+    Start-Process (Join-Path $mt5 'terminal64.exe') -ArgumentList '/algotrading'
+    Start-Sleep 60
   }
 }
 

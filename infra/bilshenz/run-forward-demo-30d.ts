@@ -101,6 +101,8 @@ function orderIdempotencyKey(barT: number, side: string, setup: string): string 
 async function mt5Status(): Promise<{
   connected: boolean;
   trade_allowed: boolean;
+  terminal_trade_allowed: boolean;
+  execution_ready: boolean;
   equity: number;
   server: string | null;
   spreadPips: number;
@@ -110,6 +112,7 @@ async function mt5Status(): Promise<{
   if (!st.ok) throw new Error(`MT5 status HTTP ${st.status}`);
   const j = (await st.json()) as {
     connected?: boolean;
+    terminal_trade_allowed?: boolean;
     account?: { equity?: number; server?: string; trade_allowed?: boolean };
     trade_allowed?: boolean;
   };
@@ -125,9 +128,13 @@ async function mt5Status(): Promise<{
   } catch {
     /* optional */
   }
+  const accountTrade = !!(j.trade_allowed ?? j.account?.trade_allowed);
+  const terminalTrade = !!j.terminal_trade_allowed;
   return {
     connected: !!j.connected,
-    trade_allowed: !!(j.trade_allowed ?? j.account?.trade_allowed),
+    trade_allowed: accountTrade,
+    terminal_trade_allowed: terminalTrade,
+    execution_ready: !!j.connected && accountTrade && terminalTrade,
     equity: j.account?.equity ?? 1000,
     server: j.account?.server ?? null,
     spreadPips,
@@ -221,7 +228,7 @@ async function tickOnce(session: SessionState): Promise<void> {
   if (safety.failsafe) {
     try {
       const probe = await mt5Status();
-      if (probe.connected && probe.trade_allowed) {
+      if (probe.execution_ready) {
         safety.failsafe = false;
         safety.failsafeReason = null;
         safety.consecutiveApiFailures = 0;
@@ -229,7 +236,9 @@ async function tickOnce(session: SessionState): Promise<void> {
         session.dryRun = effectiveDryRun(safety);
         console.error('[forward-demo] Self-healed from FAILSAFE — MT5 is back online');
       } else {
-        console.error(`[forward-demo] FAILSAFE — MT5 probe: connected=${probe.connected} trade=${probe.trade_allowed}`);
+        console.error(
+          `[forward-demo] FAILSAFE — MT5 probe: connected=${probe.connected} trade=${probe.trade_allowed} terminal=${probe.terminal_trade_allowed}`
+        );
         saveSession(session);
         return;
       }
@@ -266,6 +275,16 @@ async function tickOnce(session: SessionState): Promise<void> {
     } else {
       console.error(`[forward-demo] MT5 API error: ${msg}`);
     }
+    return;
+  }
+
+  if (!status.execution_ready) {
+    const why = !status.terminal_trade_allowed
+      ? 'MT5 AutoTrading disabled — enable Algo Trading or restart terminal with /algotrading'
+      : 'MT5 account trade not allowed';
+    console.error(`[forward-demo] Execution blocked: ${why}`);
+    saveSession(session);
+    saveSafetyState(safety);
     return;
   }
 
@@ -421,6 +440,18 @@ async function tickOnce(session: SessionState): Promise<void> {
   if (isDuplicateOrder(safety, bar.t, idemKey)) {
     logForwardMissed({ reason: 'duplicate order guard', barTimeMs: bar.t });
     console.error(`[forward-demo] ${new Date(bar.t).toISOString()} blocked: duplicate order guard`);
+    saveSafetyState(safety);
+    return;
+  }
+
+  if (!status.execution_ready) {
+    logForwardMissed({
+      reason: !status.terminal_trade_allowed
+        ? 'MT5 AutoTrading disabled'
+        : 'MT5 trade not allowed',
+      barTimeMs: bar.t,
+    });
+    console.error(`[forward-demo] ${new Date(bar.t).toISOString()} skipped order: MT5 not execution-ready`);
     saveSafetyState(safety);
     return;
   }

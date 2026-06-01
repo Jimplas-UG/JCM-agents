@@ -86,7 +86,15 @@ Start-Sleep -Seconds 5
 try {
     $m = Invoke-RestMethod "http://127.0.0.1:8765/api/status" -TimeoutSec 10
     $safety = "C:\logs\tradingbot\safety-state.json"
-    if ($m.connected -and (Test-Path $safety)) {
+    $execReady = $m.connected -and $m.terminal_trade_allowed -and $m.account.trade_allowed
+    if (-not $m.terminal_trade_allowed) {
+        Log "WARN: MT5 AutoTrading OFF — restarting terminal with /algotrading"
+        taskkill /f /im terminal64.exe 2>$null
+        Start-Sleep -Seconds 8
+        Start-Process $term -ArgumentList "/algotrading"
+        Start-Sleep -Seconds 45
+    }
+    if ($execReady -and (Test-Path $safety)) {
         $state = Get-Content $safety -Raw | ConvertFrom-Json
         if ($state.failsafe -or $state.consecutiveApiFailures -gt 0) {
             $state.consecutiveApiFailures = 0
@@ -98,7 +106,13 @@ try {
     }
 } catch { Log "MT5 check skipped: $($_.Exception.Message)" }
 
-# 8. Health summary
+# 8. JCM 9-agent scheduler (Mission Control data freshness)
+$agentStarter = "C:\jcm-project\scripts\vps-start-agent-scheduler.ps1"
+if (Test-Path $agentStarter) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $agentStarter 2>&1 | ForEach-Object { Log $_ }
+}
+
+# 9. Health summary
 Log "--- SUMMARY ---"
 try {
     $tick = Invoke-RestMethod "http://127.0.0.1:8765/api/tick/XAUUSD" -TimeoutSec 8

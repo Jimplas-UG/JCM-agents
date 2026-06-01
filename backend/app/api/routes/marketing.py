@@ -81,8 +81,8 @@ async def generate_content(
         await db.flush()
         return {"status": "created", "id": str(row.id), "title": row.title}
 
-    rows = await agent.generate_and_queue_weekly()
-    return {"status": "batch_created", "count": len(rows)}
+    rows = await agent.generate_and_queue_daily()
+    return {"status": "batch_created", "count": len(rows), "cycle": "daily"}
 
 
 @router.post("/cycle", dependencies=[Depends(verify_api_key)])

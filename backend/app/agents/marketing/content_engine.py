@@ -6,6 +6,7 @@ from typing import Any
 from app.agents.marketing.brand_kit import (
     CHANNELS,
     COMPLIANCE_FOOTER,
+    CONTENT_PILLARS,
     HASHTAGS,
     MASTER_BRAND_LINE,
     PILLAR_LABELS,
@@ -17,6 +18,54 @@ from app.agents.marketing.brand_kit import (
 
 class ContentEngine:
     """Generates platform-specific drafts from brand pillars and templates."""
+
+    def generate_daily_batch(self, cycle_date: date | None = None) -> list[dict[str, Any]]:
+        """Fresh drafts for one calendar day (rotating pillars; unique cycle_key per day)."""
+        d = cycle_date or date.today()
+        day_ix = d.toordinal()
+        items: list[dict[str, Any]] = []
+
+        linkedin_pillar = CONTENT_PILLARS[day_ix % len(CONTENT_PILLARS)]
+        li = self.generate_from_pillar(linkedin_pillar, "linkedin")
+        li["title"] = f"{li['title']} ({d.strftime('%d %b %Y')})"
+        li["metadata"] = {
+            **(li.get("metadata") or {}),
+            "cycle_key": f"daily-{d.isoformat()}-linkedin-{linkedin_pillar}",
+            "cycle_type": "daily",
+        }
+        items.append(li)
+
+        x_posts = self.x_standalone_batch()
+        x_item = dict(x_posts[day_ix % len(x_posts)])
+        x_item["title"] = f"{x_item['title']} ({d.strftime('%d %b %Y')})"
+        x_item["metadata"] = {
+            **(x_item.get("metadata") or {}),
+            "cycle_key": f"daily-{d.isoformat()}-x-{x_item['pillar']}",
+            "cycle_type": "daily",
+        }
+        items.append(x_item)
+
+        ig_generators = [
+            self.instagram_fintrix_pillars,
+            self.instagram_founder_caption,
+            self.instagram_podcast_cta,
+            self.instagram_carousel_tbills,
+        ]
+        ig = dict(ig_generators[day_ix % len(ig_generators)]())
+        ig["title"] = f"{ig['title']} ({d.strftime('%d %b %Y')})"
+        ig["metadata"] = {
+            **(ig.get("metadata") or {}),
+            "cycle_key": f"daily-{d.isoformat()}-instagram-{ig.get('pillar', 'general')}",
+            "cycle_type": "daily",
+        }
+        items.append(ig)
+
+        publish_at = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc).replace(hour=10)
+        for item in items:
+            item["scheduled_for"] = publish_at.isoformat()
+            item["compliance_warnings"] = validate_content(item["body"])
+
+        return items
 
     def generate_weekly_batch(self, week_start: date | None = None) -> list[dict[str, Any]]:
         start = week_start or date.today()
