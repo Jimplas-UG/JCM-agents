@@ -47,8 +47,8 @@ import {
   publishTradeBlocked,
   publishTradeExecuted,
 } from '../jcm/jcmSupervisorPublisher';
-import { logEquitySnapshot, logForwardMissed, logForwardSignal } from '../validation/logForwardEvent';
-import { forwardDemoLogPath } from '../validation/forwardDemoStore';
+import { logEquitySnapshot, logForwardMissed, logForwardSignal } from './validation/logForwardEvent';
+import { forwardDemoLogPath } from './validation/forwardDemoStore';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.join(__dirname, '..');

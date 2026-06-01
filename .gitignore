@@ -13,3 +13,8 @@ backend/reports/*.json
 backend/logs/
 .DS_Store
 *.log
+.env.vps
+reports/forward-demo-log.jsonl
+reports/forward-demo-journal.json
+reports/forward-execution-audit-report.txt
+wordpress/
