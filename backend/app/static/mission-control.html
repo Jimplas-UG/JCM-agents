@@ -923,12 +923,139 @@
       return `<table class="trade-table"><thead>${head}</thead><tbody>${body}</tbody></table>`;
     }
 
-    async function load() {
+    let missionDataReady = false;
+    let refreshInFlight = false;
+
+    function paintBriefingPanels(b, ov, perf) {
+      const perfBase = b.performance_vs_baseline || {};
+      const staleNote = b._stale
+        ? `<p class="muted" style="margin-bottom:.75rem">Showing cached briefing from ${esc(b._cached_date)} — today's run is scheduled for 09:00 Kampala.</p>`
+        : "";
+      $("executive").innerHTML = staleNote + renderExecutiveBriefing(b) + `
+        <div class="block"><h3>Financial Snapshot</h3>
+          ${cards([
+            ["Live P&L", "$"+fmt(b.pnl?.live_pnl), (b.pnl?.live_pnl||0)>=0?"var(--green)":"var(--red)"],
+            ["Daily P&L", "$"+fmt(b.pnl?.daily_pnl)],
+            ["Account Equity", "$"+fmt(b.pnl?.account_equity)],
+            ["Risk Score", fmt(b.risk?.risk_score,1)],
+            ["Drawdown", fmt(b.risk?.drawdown_pct,1)+"%"],
+            ["Infra Score", fmt((b.infrastructure?.health_score||0)*100,0)+"%"],
+          ])}
+        </div>`;
+      $("regime").innerHTML = hero("Market Regime Analysis", "BSv3.2 regime classification and baseline performance") + `
+        <div class="block"><h3>Current Regime</h3>
+          ${cards([
+            ["Regime", esc(b.bsv32_system?.market_regime || ov.market_regime)],
+            ["NFP Blackout", b.bsv32_system?.nfp_blackout ? "ACTIVE" : "Clear", b.bsv32_system?.nfp_blackout ? "var(--amber)" : "var(--green)"],
+            ["System Status", esc(b.bsv32_system?.status)],
+            ["Win Rate", perfBase.win_rate != null ? (perfBase.win_rate*100).toFixed(1)+"%" : (perf?.win_rate != null ? (perf.win_rate*100).toFixed(1)+"%" : "—")],
+          ])}
+        </div>
+        <div class="block"><h3>Performance vs Baseline</h3>
+          ${cards([
+            ["Expectancy", fmt(perfBase.expectancy ?? perf?.expectancy)],
+            ["Edge Decay", fmt(perfBase.edge_decay_score ?? perf?.edge_decay_score, 2)],
+            ["Anomalies", (perfBase.anomaly_flags||perf?.anomaly_flags||[]).length || 0],
+          ])}
+          ${(perfBase.anomaly_flags||[]).length ? `<p class="muted" style="margin-top:.75rem">${esc(perfBase.anomaly_flags.join(", "))}</p>` : ""}
+        </div>`;
+    }
+
+    function paintSecondaryPanels(ov, infra, risk, perf, execQ, trades, mktStats, mktQueue, mktTrends, alerts, research) {
+      if (infra?.current) {
+        const svc = infra.current.services || {};
+        const v = infra.current.vps || {};
+        $("infrastructure").innerHTML = hero("Infrastructure Command", "VPS, APIs, and execution layer health") + `
+          <div style="margin-bottom:1rem">${badge(infra.current.healthy, infra.current.healthy ? "All Systems Operational" : "Degraded")}</div>
+          <div class="block"><h3>Service Endpoints</h3>
+            ${Object.entries(svc).map(([n,s]) =>
+              `<div class="svc"><span>${esc(n.replace(/_/g," "))}</span>${badge(s.ok, s.ok ? (s.latency_ms+"ms") : "DOWN")}</div>`
+            ).join("")}
+          </div>
+          <div class="block"><h3>VPS Resources</h3>
+            ${cards([["CPU", fmt(v.cpu_pct,1)+"%"], ["RAM", fmt(v.ram_pct,1)+"%"], ["Disk", fmt(v.disk_pct,1)+"%"]])}
+          </div>`;
+      }
+
+      $("analytics").innerHTML = hero("Quant Analytics", "Performance intelligence and execution quality") + `
+        <div class="block"><h3>Trade History</h3>
+          ${tradeHistoryTable(trades)}
+        </div>
+        <div class="block"><h3>Performance Intelligence</h3>
+          ${renderPerformanceIntel(perf)}
+        </div>
+        <div class="block"><h3>Execution Quality</h3>
+          ${renderExecutionQuality(execQ)}
+        </div>
+        ${risk ? `<div class="block"><h3>Risk Orchestrator</h3>${cards([
+          ["Risk Score", fmt(risk.risk_score,1)],
+          ["Drawdown", fmt(risk.account_drawdown_pct,1)+"%"],
+          ["Lot Scaling", fmt(risk.lot_scaling_factor,2)],
+          ["Kill Switch", risk.kill_switch_recommended ? "RECOMMENDED" : "Clear", risk.kill_switch_recommended ? "var(--red)" : "var(--green)"],
+        ])}</div>` : ""}`;
+
+      window.__mktQueue = mktQueue;
+      window.__mktTrends = mktTrends || [];
+      window.__research = research || [];
+      window.__alerts = alerts || [];
+
+      $("marketing").innerHTML = hero("Marketing Intelligence", "Brand content pipeline and trend signals · click an article to read") + `
+        <div class="block"><h3>Content Pipeline</h3>
+          ${mktStats ? cards([
+            ["Drafts", mktStats.draft_count ?? 0],
+            ["Approved", mktStats.approved_count ?? 0],
+          ]) : `<p class="muted">Marketing agent loading…</p>`}
+        </div>
+        <div class="block"><h3>Content Queue</h3>
+          ${(mktQueue||[]).map((i, idx) => clickableRow(
+            i.title || i.platform,
+            `${i.platform} · ${i.pillar || i.content_type || ""} · ${i.status || "draft"}`,
+            "Read article",
+            `openMktArticle(${idx})`
+          )).join("") || `<p class="muted">No content in queue</p>`}
+        </div>
+        <div class="block"><h3>Trend Signals</h3>
+          ${(mktTrends||[]).map((t, idx) => clickableRow(
+            t.topic,
+            t.suggested_angle || t.category || "",
+            "Read",
+            `openTrendItem(${idx})`
+          )).join("") || `<p class="muted">No trends detected yet</p>`}
+        </div>`;
+
+      $("alerts").innerHTML = hero("Alerts & Research", "System alerts and quant research · click to read full detail") + `
+        <div class="block"><h3>Active Alerts (${(alerts||[]).length})</h3>
+          ${(alerts||[]).map((a, idx) => clickableRow(
+            a.title,
+            `${a.severity} · ${(a.created_at||"").slice(0,19)}`,
+            "Read",
+            `openAlertItem(${idx})`
+          )).join("") || `<p class="muted">No active alerts</p>`}
+        </div>
+        <div class="block"><h3>Research Queue (${(research||[]).length})</h3>
+          ${(research||[]).map((r, idx) => clickableRow(
+            r.title,
+            `${r.finding_type} · ${r.severity}`,
+            "Read",
+            `openResearchItem(${idx})`
+          )).join("") || `<p class="muted">No pending research</p>`}
+        </div>`;
+    }
+
+    async function load(opts = {}) {
+      const initial = opts.initial ?? !missionDataReady;
+      if (refreshInFlight) return;
+      refreshInFlight = true;
+      const prevStatus = $("status").textContent;
       try {
-        $("status").textContent = "Loading snapshot…";
-        ["executive", "regime", "infrastructure", "analytics", "marketing", "alerts"].forEach((id) => {
-          $(id).innerHTML = loadingBlock("Loading…");
-        });
+        if (initial) {
+          $("status").textContent = "Loading snapshot…";
+          ["executive", "regime", "infrastructure", "analytics", "marketing", "alerts"].forEach((id) => {
+            $(id).innerHTML = loadingBlock("Loading…");
+          });
+        } else if (!document.hidden) {
+          $("status").textContent = "Refreshing…";
+        }
 
         const ov = await get("/dashboard/overview", 12000);
         paintOverview(ov);
@@ -949,7 +1076,6 @@
         ]);
         const briefingP = get("/dashboard/briefing", 15000).catch(() => null);
 
-        $("status").textContent = "Syncing panels…";
         const [registry, panelResults, briefingRaw] = await Promise.all([
           registryP,
           panelsP,
@@ -965,122 +1091,16 @@
         const briefing = briefingRaw && briefingRaw.ready === false ? null : briefingRaw;
 
         if (briefing) {
-          const b = briefing;
-          const perfBase = b.performance_vs_baseline || {};
-          const staleNote = b._stale
-            ? `<p class="muted" style="margin-bottom:.75rem">Showing cached briefing from ${esc(b._cached_date)} — today's run is scheduled for 09:00 Kampala.</p>`
-            : "";
-          $("executive").innerHTML = staleNote + renderExecutiveBriefing(b) + `
-            <div class="block"><h3>Financial Snapshot</h3>
-              ${cards([
-                ["Live P&L", "$"+fmt(b.pnl?.live_pnl), (b.pnl?.live_pnl||0)>=0?"var(--green)":"var(--red)"],
-                ["Daily P&L", "$"+fmt(b.pnl?.daily_pnl)],
-                ["Account Equity", "$"+fmt(b.pnl?.account_equity)],
-                ["Risk Score", fmt(b.risk?.risk_score,1)],
-                ["Drawdown", fmt(b.risk?.drawdown_pct,1)+"%"],
-                ["Infra Score", fmt((b.infrastructure?.health_score||0)*100,0)+"%"],
-              ])}
-            </div>`;
-          $("regime").innerHTML = hero("Market Regime Analysis", "BSv3.2 regime classification and baseline performance") + `
-            <div class="block"><h3>Current Regime</h3>
-              ${cards([
-                ["Regime", esc(b.bsv32_system?.market_regime || ov.market_regime)],
-                ["NFP Blackout", b.bsv32_system?.nfp_blackout ? "ACTIVE" : "Clear", b.bsv32_system?.nfp_blackout ? "var(--amber)" : "var(--green)"],
-                ["System Status", esc(b.bsv32_system?.status)],
-                ["Win Rate", perfBase.win_rate != null ? (perfBase.win_rate*100).toFixed(1)+"%" : (perf?.win_rate != null ? (perf.win_rate*100).toFixed(1)+"%" : "—")],
-              ])}
-            </div>
-            <div class="block"><h3>Performance vs Baseline</h3>
-              ${cards([
-                ["Expectancy", fmt(perfBase.expectancy ?? perf?.expectancy)],
-                ["Edge Decay", fmt(perfBase.edge_decay_score ?? perf?.edge_decay_score, 2)],
-                ["Anomalies", (perfBase.anomaly_flags||perf?.anomaly_flags||[]).length || 0],
-              ])}
-              ${(perfBase.anomaly_flags||[]).length ? `<p class="muted" style="margin-top:.75rem">${esc(perfBase.anomaly_flags.join(", "))}</p>` : ""}
-            </div>`;
-        } else {
-          $("executive").innerHTML = hero("Executive Briefing", "Awaiting CEO Copilot data") + `<div class="block"><p class="muted">Briefing will populate on next agent cycle</p></div>`;
+          paintBriefingPanels(briefing, ov, perf);
+        } else if (initial || !$("executive").innerHTML.includes("Executive")) {
+          $("executive").innerHTML = hero("Executive Briefing", "Awaiting CEO Copilot data") + `<div class="block"><p class="muted">Briefing will populate on next agent cycle (09:00 Kampala)</p></div>`;
           $("regime").innerHTML = hero("Market Regime", esc(ov.market_regime || "unknown"));
         }
 
-        const svc = infra.current?.services || {};
-        const v = infra.current?.vps || {};
-        $("infrastructure").innerHTML = hero("Infrastructure Command", "VPS, APIs, and execution layer health") + `
-          <div style="margin-bottom:1rem">${badge(infra.current?.healthy, infra.current?.healthy ? "All Systems Operational" : "Degraded")}</div>
-          <div class="block"><h3>Service Endpoints</h3>
-            ${Object.entries(svc).map(([n,s]) =>
-              `<div class="svc"><span>${esc(n.replace(/_/g," "))}</span>${badge(s.ok, s.ok ? (s.latency_ms+"ms") : "DOWN")}</div>`
-            ).join("")}
-          </div>
-          <div class="block"><h3>VPS Resources</h3>
-            ${cards([["CPU", fmt(v.cpu_pct,1)+"%"], ["RAM", fmt(v.ram_pct,1)+"%"], ["Disk", fmt(v.disk_pct,1)+"%"]])}
-          </div>`;
+        paintSecondaryPanels(ov, infra, risk, perf, execQ, trades, mktStats, mktQueue, mktTrends, alerts, research);
 
-        $("analytics").innerHTML = hero("Quant Analytics", "Performance intelligence and execution quality") + `
-          <div class="block"><h3>Trade History</h3>
-            ${tradeHistoryTable(trades)}
-          </div>
-          <div class="block"><h3>Performance Intelligence</h3>
-            ${renderPerformanceIntel(perf)}
-          </div>
-          <div class="block"><h3>Execution Quality</h3>
-            ${renderExecutionQuality(execQ)}
-          </div>
-          ${risk ? `<div class="block"><h3>Risk Orchestrator</h3>${cards([
-            ["Risk Score", fmt(risk.risk_score,1)],
-            ["Drawdown", fmt(risk.account_drawdown_pct,1)+"%"],
-            ["Lot Scaling", fmt(risk.lot_scaling_factor,2)],
-            ["Kill Switch", risk.kill_switch_recommended ? "RECOMMENDED" : "Clear", risk.kill_switch_recommended ? "var(--red)" : "var(--green)"],
-          ])}</div>` : ""}`;
-
-        window.__mktQueue = mktQueue;
-        window.__mktTrends = mktTrends || [];
-        window.__research = research || [];
-        window.__alerts = alerts || [];
-
-        $("marketing").innerHTML = hero("Marketing Intelligence", "Brand content pipeline and trend signals · click an article to read") + `
-          <div class="block"><h3>Content Pipeline</h3>
-            ${mktStats ? cards([
-              ["Drafts", mktStats.draft_count ?? 0],
-              ["Approved", mktStats.approved_count ?? 0],
-            ]) : `<p class="muted">Marketing agent loading…</p>`}
-          </div>
-          <div class="block"><h3>Content Queue</h3>
-            ${(mktQueue||[]).map((i, idx) => clickableRow(
-              i.title || i.platform,
-              `${i.platform} · ${i.pillar || i.content_type || ""} · ${i.status || "draft"}`,
-              "Read article",
-              `openMktArticle(${idx})`
-            )).join("") || `<p class="muted">No content in queue</p>`}
-          </div>
-          <div class="block"><h3>Trend Signals</h3>
-            ${(mktTrends||[]).map((t, idx) => clickableRow(
-              t.topic,
-              t.suggested_angle || t.category || "",
-              "Read",
-              `openTrendItem(${idx})`
-            )).join("") || `<p class="muted">No trends detected yet</p>`}
-          </div>`;
-
-        $("alerts").innerHTML = hero("Alerts & Research", "System alerts and quant research · click to read full detail") + `
-          <div class="block"><h3>Active Alerts (${(alerts||[]).length})</h3>
-            ${(alerts||[]).map((a, idx) => clickableRow(
-              a.title,
-              `${a.severity} · ${(a.created_at||"").slice(0,19)}`,
-              "Read",
-              `openAlertItem(${idx})`
-            )).join("") || `<p class="muted">No active alerts</p>`}
-          </div>
-          <div class="block"><h3>Research Queue (${(research||[]).length})</h3>
-            ${(research||[]).map((r, idx) => clickableRow(
-              r.title,
-              `${r.finding_type} · ${r.severity}`,
-              "Read",
-              `openResearchItem(${idx})`
-            )).join("") || `<p class="muted">No pending research</p>`}
-          </div>`;
-
-        $("status").textContent = "Sync " + new Date().toLocaleTimeString();
+        missionDataReady = true;
+        $("status").textContent = "Live · " + new Date().toLocaleTimeString();
         hideLoginGate();
       } catch (e) {
         if (e.message === "login_required") {
@@ -1088,8 +1108,14 @@
           $("status").textContent = "Sign in required";
           return;
         }
-        $("status").textContent = "Error: " + e.message;
-        $("overview").innerHTML = `<div class="block"><p class="muted">Could not load data: ${esc(e.message)}</p></div>`;
+        if (!missionDataReady) {
+          $("status").textContent = "Error: " + e.message;
+          $("overview").innerHTML = `<div class="block"><p class="muted">Could not load data: ${esc(e.message)}</p></div>`;
+        } else {
+          $("status").textContent = prevStatus || "Live";
+        }
+      } finally {
+        refreshInFlight = false;
       }
     }
 
@@ -1100,9 +1126,15 @@
       }
       hideLoginGate();
       show("overview", "Command Overview");
-      await load();
-      setInterval(load, 30000);
+      await load({ initial: true });
+      setInterval(() => {
+        if (!document.hidden) load({ initial: false });
+      }, 60000);
     }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && missionDataReady && getMcAuth()) load({ initial: false });
+    });
 
     $("login-btn").onclick = async () => {
       const u = $("login-user").value.trim();
