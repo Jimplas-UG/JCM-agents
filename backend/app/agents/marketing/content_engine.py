@@ -19,31 +19,48 @@ from app.agents.marketing.brand_kit import (
 class ContentEngine:
     """Generates platform-specific drafts from brand pillars and templates."""
 
+    def _daily_meta(self, d: date, platform: str, slot: int, pillar: str) -> dict[str, Any]:
+        return {
+            "cycle_key": f"daily-{d.isoformat()}-{platform}-{slot}-{pillar}",
+            "cycle_type": "daily",
+            "cycle_date": d.isoformat(),
+        }
+
     def generate_daily_batch(self, cycle_date: date | None = None) -> list[dict[str, Any]]:
-        """Fresh drafts for one calendar day (rotating pillars; unique cycle_key per day)."""
+        """12 fresh drafts per day: 3 articles, 3 LinkedIn, 3 X, 3 Instagram."""
         d = cycle_date or date.today()
         day_ix = d.toordinal()
+        date_label = d.strftime("%d %b %Y")
         items: list[dict[str, Any]] = []
 
-        linkedin_pillar = CONTENT_PILLARS[day_ix % len(CONTENT_PILLARS)]
-        li = self.generate_from_pillar(linkedin_pillar, "linkedin")
-        li["title"] = f"{li['title']} ({d.strftime('%d %b %Y')})"
-        li["metadata"] = {
-            **(li.get("metadata") or {}),
-            "cycle_key": f"daily-{d.isoformat()}-linkedin-{linkedin_pillar}",
-            "cycle_type": "daily",
-        }
-        items.append(li)
+        article_generators = [
+            self.article_infrastructure,
+            self.article_african_markets,
+            self.article_quant_discipline,
+        ]
+        for i, gen in enumerate(article_generators):
+            art = gen()
+            art["title"] = f"{art['title']} ({date_label})"
+            art["metadata"] = self._daily_meta(d, "article", i, art["pillar"])
+            items.append(art)
 
-        x_posts = self.x_standalone_batch()
-        x_item = dict(x_posts[day_ix % len(x_posts)])
-        x_item["title"] = f"{x_item['title']} ({d.strftime('%d %b %Y')})"
-        x_item["metadata"] = {
-            **(x_item.get("metadata") or {}),
-            "cycle_key": f"daily-{d.isoformat()}-x-{x_item['pillar']}",
-            "cycle_type": "daily",
-        }
-        items.append(x_item)
+        linkedin_generators = [
+            self.linkedin_infrastructure_post,
+            self.linkedin_tbills_post,
+            self.linkedin_smart_money_2026,
+        ]
+        for i, gen in enumerate(linkedin_generators):
+            li = gen()
+            li["title"] = f"{li['title']} ({date_label})"
+            li["metadata"] = self._daily_meta(d, "linkedin", i, li["pillar"])
+            items.append(li)
+
+        x_pool = self.x_standalone_batch()
+        for i in range(3):
+            x_item = dict(x_pool[(day_ix + i) % len(x_pool)])
+            x_item["title"] = f"{x_item['title']} ({date_label})"
+            x_item["metadata"] = self._daily_meta(d, "x", i, x_item["pillar"])
+            items.append(x_item)
 
         ig_generators = [
             self.instagram_fintrix_pillars,
@@ -51,21 +68,95 @@ class ContentEngine:
             self.instagram_podcast_cta,
             self.instagram_carousel_tbills,
         ]
-        ig = dict(ig_generators[day_ix % len(ig_generators)]())
-        ig["title"] = f"{ig['title']} ({d.strftime('%d %b %Y')})"
-        ig["metadata"] = {
-            **(ig.get("metadata") or {}),
-            "cycle_key": f"daily-{d.isoformat()}-instagram-{ig.get('pillar', 'general')}",
-            "cycle_type": "daily",
-        }
-        items.append(ig)
+        for i in range(3):
+            ig = dict(ig_generators[(day_ix + i) % len(ig_generators)]())
+            ig["title"] = f"{ig['title']} ({date_label})"
+            ig["metadata"] = self._daily_meta(d, "instagram", i, ig.get("pillar", "general"))
+            items.append(ig)
 
-        publish_at = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc).replace(hour=10)
-        for item in items:
-            item["scheduled_for"] = publish_at.isoformat()
+        base_hour = datetime.combine(d, datetime.min.time(), tzinfo=timezone.utc)
+        for i, item in enumerate(items):
+            scheduled = base_hour.replace(hour=9 + (i % 8))
+            item["scheduled_for"] = scheduled.isoformat()
             item["compliance_warnings"] = validate_content(item["body"])
 
         return items
+
+    def article_infrastructure(self) -> dict[str, Any]:
+        body = f"""Why "financial infrastructure" matters more than hot tips
+
+Markets reward process long before they reward luck. At Jimplas Capital Management we define financial infrastructure as the stack that connects advisory discipline, systematic technology, and capital-flow intelligence — so decisions are repeatable under stress.
+
+Three layers we build from Gulu outward:
+
+1. Advisory discipline — objectives, risk budgets, and governance before product selection.
+2. Systematic technology — observability and automation that reduce emotional override.
+3. Capital-flow systems — including Fintrix (Flow · Intelligence · Access) so capital is not trapped in friction.
+
+This is not a promise of returns on social media. It is a commitment to clarity, documentation, and respect for risk — with global standards and local depth.
+
+Questions for your leadership team:
+• Where does intelligence break down today — data, process, or accountability?
+• What would change if every decision left an audit trail?
+
+{SOCIAL_FOOTER}{COMPLIANCE_FOOTER}"""
+        return {
+            "platform": "article",
+            "content_type": "article",
+            "pillar": "infrastructure_first",
+            "title": "Financial intelligence infrastructure",
+            "body": body,
+            "hashtags": HASHTAGS["linkedin"],
+        }
+
+    def article_african_markets(self) -> dict[str, Any]:
+        ep = PODCAST_EPISODES[0]
+        body = f"""Uganda Treasury bills: a conservative allocator's primer
+
+Treasury bills are often dismissed as "boring." For many portfolios, boring is a feature — not a bug.
+
+In this article we outline how Bank of Uganda T-bills and bonds function as structured lending to government, why transparency matters for retail and institutional participants, and how they can sit inside a process-first portfolio without being treated as speculation.
+
+We also connect the discussion to our podcast deep-dive:
+▶️ {ep['title']}
+
+Who should read this:
+• Savers comparing formal fixed income to informal alternatives
+• Diaspora investors seeking Uganda context
+• Leaders building investment committees with documented process
+
+{SOCIAL_FOOTER}{COMPLIANCE_FOOTER}"""
+        return {
+            "platform": "article",
+            "content_type": "article",
+            "pillar": "african_capital_markets",
+            "title": "Uganda T-bills and bonds explained",
+            "body": body,
+            "hashtags": HASHTAGS["linkedin"],
+        }
+
+    def article_quant_discipline(self) -> dict[str, Any]:
+        body = f"""Quant discipline without the hype
+
+Systematic investing is not a black box and it is not a guarantee. It is a commitment to rules, measurement, and review — especially when volatility rises.
+
+At JCM we supervise execution and risk alongside BSv3.2 infrastructure. We do not publish trade signals for social media. We publish principles:
+
+• Measure slippage, latency, and rejection rates — execution is part of edge.
+• Separate research evolution from live deployment — humans approve changes.
+• Treat drawdown and correlation as first-class metrics, not footnotes.
+
+If your organization is exploring automation, start with observability. Signals without infrastructure are noise.
+
+{SOCIAL_FOOTER}{COMPLIANCE_FOOTER}"""
+        return {
+            "platform": "article",
+            "content_type": "article",
+            "pillar": "quant_discipline",
+            "title": "Quant discipline without the hype",
+            "body": body,
+            "hashtags": HASHTAGS["linkedin"],
+        }
 
     def generate_weekly_batch(self, week_start: date | None = None) -> list[dict[str, Any]]:
         start = week_start or date.today()

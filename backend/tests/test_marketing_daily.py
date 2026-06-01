@@ -13,9 +13,15 @@ def test_daily_batch_unique_cycle_keys_per_day() -> None:
     batch2 = engine.generate_daily_batch(d2)
     keys1 = {item["metadata"]["cycle_key"] for item in batch1}
     keys2 = {item["metadata"]["cycle_key"] for item in batch2}
-    assert len(batch1) == 3
-    assert len(batch2) == 3
+    assert len(batch1) == 12
+    assert len(batch2) == 12
     assert keys1.isdisjoint(keys2)
+    platforms = {item["platform"] for item in batch1}
+    assert platforms == {"article", "linkedin", "x", "instagram"}
+    assert sum(1 for i in batch1 if i["platform"] == "article") == 3
+    assert sum(1 for i in batch1 if i["platform"] == "linkedin") == 3
+    assert sum(1 for i in batch1 if i["platform"] == "x") == 3
+    assert sum(1 for i in batch1 if i["platform"] == "instagram") == 3
 
 
 def test_daily_batch_same_day_idempotent_keys() -> None:

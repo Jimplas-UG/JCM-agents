@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
@@ -33,8 +33,10 @@ class MarketingAgent(BaseAgent):
         self.engine = ContentEngine()
 
     async def run_cycle(self) -> dict[str, Any]:
+        today = date.today()
+        purged = await self.purge_stale_marketing_data(today)
         trends = await self.scan_trends()
-        generated = await self.generate_and_queue_daily()
+        generated = await self.generate_and_queue_daily(today, purge_first=False)
         report = await self._persist_cycle_report(trends, generated)
 
         await publish(
@@ -43,6 +45,7 @@ class MarketingAgent(BaseAgent):
                 "type": "marketing_cycle_complete",
                 "items_generated": len(generated),
                 "trends": len(trends),
+                "purged": purged,
             }),
         )
 
@@ -51,7 +54,34 @@ class MarketingAgent(BaseAgent):
             "items_generated": len(generated),
             "trends_scanned": len(trends),
             "report_date": str(report.cycle_date),
+            "purged": purged,
         }
+
+    async def purge_stale_marketing_data(self, today: date | None = None) -> dict[str, int]:
+        """Clear yesterday's drafts, trend log, and cycle reports before today's batch."""
+        today = today or date.today()
+        start_today = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
+
+        drafts = await self.db.execute(
+            delete(MarketingContentQueue).where(
+                MarketingContentQueue.status == "draft",
+                MarketingContentQueue.created_at < start_today,
+            )
+        )
+        trends = await self.db.execute(
+            delete(MarketingTrendSignal).where(MarketingTrendSignal.created_at < start_today)
+        )
+        reports = await self.db.execute(
+            delete(MarketingCycleReport).where(MarketingCycleReport.cycle_date < today)
+        )
+
+        counts = {
+            "drafts_removed": drafts.rowcount or 0,
+            "trends_removed": trends.rowcount or 0,
+            "reports_removed": reports.rowcount or 0,
+        }
+        self.logger.info("marketing_stale_purged", **counts, cycle_date=str(today))
+        return counts
 
     async def _already_queued_cycle_key(self, cycle_key: str) -> bool:
         result = await self.db.execute(
@@ -114,9 +144,17 @@ class MarketingAgent(BaseAgent):
         self.logger.info("marketing_content_queued", count=len(rows))
         return rows
 
-    async def generate_and_queue_daily(self, cycle_date: date | None = None) -> list[MarketingContentQueue]:
-        """Queue rotating LinkedIn + X + Instagram drafts for the given day (idempotent per cycle_key)."""
-        batch = self.engine.generate_daily_batch(cycle_date)
+    async def generate_and_queue_daily(
+        self,
+        cycle_date: date | None = None,
+        *,
+        purge_first: bool = True,
+    ) -> list[MarketingContentQueue]:
+        """Queue 12 daily drafts (3 article, 3 LinkedIn, 3 X, 3 Instagram); idempotent per cycle_key."""
+        d = cycle_date or date.today()
+        if purge_first:
+            await self.purge_stale_marketing_data(d)
+        batch = self.engine.generate_daily_batch(d)
         return await self._queue_batch_items(batch)
 
     async def generate_and_queue_weekly(self) -> list[MarketingContentQueue]:

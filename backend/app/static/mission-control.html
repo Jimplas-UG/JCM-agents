@@ -1068,7 +1068,7 @@
           get("/dashboard/execution-quality", 12000).catch(() => null),
           get("/dashboard/trades?limit=25", 12000).catch(() => []),
           get("/marketing/stats", 12000).catch(() => null),
-          get("/marketing/queue?status=draft&limit=10", 12000).catch(() => []),
+          get("/marketing/queue?status=draft&limit=24", 12000).catch(() => []),
           get("/marketing/queue?status=approved&limit=10", 12000).catch(() => []),
           get("/marketing/trends?limit=6", 12000).catch(() => []),
           get("/dashboard/alerts?limit=12", 12000).catch(() => []),
