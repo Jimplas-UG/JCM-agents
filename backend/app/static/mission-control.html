@@ -404,6 +404,11 @@
       cursor: pointer;
     }
     .login-err { color: var(--red); margin-top: 0.65rem; font-size: 0.82rem; }
+    .loading-pulse {
+      color: var(--muted);
+      font-size: 0.85rem;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
     .modal {
       background: var(--panel);
       border: 1px solid var(--border-strong);
@@ -606,17 +611,55 @@
       $("login-gate").style.display = "none";
     }
 
-    async function get(path) {
+    async function get(path, timeoutMs = 20000) {
       const headers = {};
       const auth = getMcAuth();
       if (auth) headers.Authorization = `Basic ${auth}`;
-      const r = await fetch(path, { credentials: "include", headers });
-      if (r.status === 401) {
-        clearMcAuth();
-        throw new Error("login_required");
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(path, { credentials: "include", headers, signal: ctrl.signal });
+        if (r.status === 401) {
+          clearMcAuth();
+          throw new Error("login_required");
+        }
+        if (!r.ok) throw new Error(path + " " + r.status);
+        return r.json();
+      } finally {
+        clearTimeout(timer);
       }
-      if (!r.ok) throw new Error(path + " " + r.status);
-      return r.json();
+    }
+
+    function loadingBlock(label) {
+      return `<div class="block"><p class="loading-pulse">${esc(label)}</p></div>`;
+    }
+
+    function paintOverview(ov) {
+      $("bsv32-badge").textContent = `BSv3.2 ${ov.bsv32_status || "unknown"}`;
+      $("bsv32-badge").className = "badge " + (ov.system_running ? "badge-ok" : "badge-warn");
+      $("regime-badge").textContent = `${ov.market_regime || "unknown"} regime`;
+      $("regime-badge").className = "badge badge-gold";
+      $("overview").innerHTML = hero("Mission Control Snapshot", "Real-time supervisory intelligence across the BSv3.2 stack") + cards([
+        ["Live P&L", "$" + fmt(ov.live_pnl), ov.live_pnl >= 0 ? "var(--green)" : "var(--red)"],
+        ["Daily P&L", "$" + fmt(ov.daily_pnl)],
+        ["Open Positions", ov.open_positions ?? 0],
+        ["Risk Score", fmt(ov.risk_score, 1)],
+        ["Infra Health", fmt(ov.infra_health_score, 0) + "%"],
+        ["Active Alerts", ov.active_alerts ?? 0],
+        ["Pending Reviews", ov.pending_reviews ?? 0],
+        ["MT5 Bridge", ov.mt5_connected ? "Online" : "Offline", ov.mt5_connected ? "var(--green)" : "var(--red)"],
+      ]);
+    }
+
+    function paintAgents(registry) {
+      $("agents").innerHTML = hero("Agent Network", `${registry.count} supervisory agents · read-only observer mode`) + `
+        <div class="block"><h3>Registered Agents</h3>
+          ${(registry.agents||[]).map(a => `
+            <div class="agent">
+              <span class="agent-name">${esc(a.name.replace(/_/g," "))}</span><span class="tag">${esc(a.interval_label)}</span>
+              <div class="muted" style="margin-top:.35rem">${esc(a.description)}</div>
+            </div>`).join("")}
+        </div>`;
     }
 
     function cards(items) {
@@ -882,44 +925,52 @@
 
     async function load() {
       try {
-        const [ov, briefing, infra, risk, perf, execQ, trades, mktStats, mktDraft, mktApproved, mktTrends, alerts, research, registry] = await Promise.all([
-          get("/dashboard/overview"),
-          get("/dashboard/briefing").catch(() => null),
-          get("/dashboard/infrastructure"),
-          get("/dashboard/risk").catch(() => null),
-          get("/dashboard/performance").catch(() => null),
-          get("/dashboard/execution-quality").catch(() => null),
-          get("/dashboard/trades?limit=40").catch(() => []),
-          get("/marketing/stats").catch(() => null),
-          get("/marketing/queue?status=draft&limit=20").catch(() => []),
-          get("/marketing/queue?status=approved&limit=20").catch(() => []),
-          get("/marketing/trends?limit=8").catch(() => []),
-          get("/dashboard/alerts?limit=15").catch(() => []),
-          get("/dashboard/research?status=pending").catch(() => []),
-          get("/agents/registry"),
+        $("status").textContent = "Loading snapshot…";
+        ["executive", "regime", "infrastructure", "analytics", "marketing", "alerts"].forEach((id) => {
+          $(id).innerHTML = loadingBlock("Loading…");
+        });
+
+        const ov = await get("/dashboard/overview", 12000);
+        paintOverview(ov);
+
+        const registryP = get("/agents/registry", 12000);
+        const panelsP = Promise.allSettled([
+          get("/dashboard/infrastructure", 15000),
+          get("/dashboard/risk", 12000).catch(() => null),
+          get("/dashboard/performance", 12000).catch(() => null),
+          get("/dashboard/execution-quality", 12000).catch(() => null),
+          get("/dashboard/trades?limit=25", 12000).catch(() => []),
+          get("/marketing/stats", 12000).catch(() => null),
+          get("/marketing/queue?status=draft&limit=10", 12000).catch(() => []),
+          get("/marketing/queue?status=approved&limit=10", 12000).catch(() => []),
+          get("/marketing/trends?limit=6", 12000).catch(() => []),
+          get("/dashboard/alerts?limit=12", 12000).catch(() => []),
+          get("/dashboard/research?status=pending&limit=10", 12000).catch(() => []),
         ]);
+        const briefingP = get("/dashboard/briefing", 15000).catch(() => null);
+
+        $("status").textContent = "Syncing panels…";
+        const [registry, panelResults, briefingRaw] = await Promise.all([
+          registryP,
+          panelsP,
+          briefingP,
+        ]);
+        paintAgents(registry);
+
+        const val = (r) => (r.status === "fulfilled" ? r.value : null);
+        const [
+          infra, risk, perf, execQ, trades, mktStats, mktDraft, mktApproved, mktTrends, alerts, research,
+        ] = panelResults.map(val);
         const mktQueue = [...(mktDraft || []), ...(mktApproved || [])];
-
-        $("bsv32-badge").textContent = `BSv3.2 ${ov.bsv32_status || "unknown"}`;
-        $("bsv32-badge").className = "badge " + (ov.system_running ? "badge-ok" : "badge-warn");
-        $("regime-badge").textContent = `${ov.market_regime || "unknown"} regime`;
-        $("regime-badge").className = "badge badge-gold";
-
-        $("overview").innerHTML = hero("Mission Control Snapshot", "Real-time supervisory intelligence across the BSv3.2 stack") + cards([
-          ["Live P&L", "$" + fmt(ov.live_pnl), ov.live_pnl >= 0 ? "var(--green)" : "var(--red)"],
-          ["Daily P&L", "$" + fmt(ov.daily_pnl)],
-          ["Open Positions", ov.open_positions ?? 0],
-          ["Risk Score", fmt(ov.risk_score, 1)],
-          ["Infra Health", fmt(ov.infra_health_score, 0) + "%"],
-          ["Active Alerts", ov.active_alerts ?? 0],
-          ["Pending Reviews", ov.pending_reviews ?? 0],
-          ["MT5 Bridge", ov.mt5_connected ? "Online" : "Offline", ov.mt5_connected ? "var(--green)" : "var(--red)"],
-        ]);
+        const briefing = briefingRaw && briefingRaw.ready === false ? null : briefingRaw;
 
         if (briefing) {
           const b = briefing;
           const perfBase = b.performance_vs_baseline || {};
-          $("executive").innerHTML = renderExecutiveBriefing(b) + `
+          const staleNote = b._stale
+            ? `<p class="muted" style="margin-bottom:.75rem">Showing cached briefing from ${esc(b._cached_date)} — today's run is scheduled for 09:00 Kampala.</p>`
+            : "";
+          $("executive").innerHTML = staleNote + renderExecutiveBriefing(b) + `
             <div class="block"><h3>Financial Snapshot</h3>
               ${cards([
                 ["Live P&L", "$"+fmt(b.pnl?.live_pnl), (b.pnl?.live_pnl||0)>=0?"var(--green)":"var(--red)"],
@@ -1009,15 +1060,6 @@
               "Read",
               `openTrendItem(${idx})`
             )).join("") || `<p class="muted">No trends detected yet</p>`}
-          </div>`;
-
-        $("agents").innerHTML = hero("Agent Network", `${registry.count} supervisory agents · read-only observer mode`) + `
-          <div class="block"><h3>Registered Agents</h3>
-            ${(registry.agents||[]).map(a => `
-              <div class="agent">
-                <span class="agent-name">${esc(a.name.replace(/_/g," "))}</span><span class="tag">${esc(a.interval_label)}</span>
-                <div class="muted" style="margin-top:.35rem">${esc(a.description)}</div>
-              </div>`).join("")}
           </div>`;
 
         $("alerts").innerHTML = hero("Alerts & Research", "System alerts and quant research · click to read full detail") + `

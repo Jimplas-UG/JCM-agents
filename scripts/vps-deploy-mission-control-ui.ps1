@@ -3,7 +3,7 @@
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Jcm = "C:/Users/Administrator/Documents/JCM agents/JCM-agents"
-$Local = "$Root\backend\app\static\mission-control.html"
+$JcmProject = "C:/jcm-project"
 $files = @(
     @{ Local = "$Root\backend\app\static\mission-control.html"; Remote = "$Jcm/backend/app/static/mission-control.html" },
     @{ Local = "$Root\backend\app\api\deps.py"; Remote = "$Jcm/backend/app/api/deps.py" },
@@ -13,11 +13,13 @@ $files = @(
     @{ Local = "$Root\backend\app\api\routes\mission_control_ui.py"; Remote = "$Jcm/backend/app/api/routes/mission_control_ui.py" }
 )
 
-Write-Host "=== Deploy Mission Control UI + auth fix ===" -ForegroundColor Cyan
+Write-Host "=== Deploy Mission Control (fast load) ===" -ForegroundColor Cyan
 foreach ($f in $files) {
     if (-not (Test-Path $f.Local)) { throw "Missing $($f.Local)" }
     Write-Host "  scp $($f.Local)"
     scp $f.Local "jcm-vps:$($f.Remote)"
+    $rel = $f.Remote.Replace($Jcm, $JcmProject)
+    scp $f.Local "jcm-vps:$rel" 2>$null
 }
 
 $remotePs1 = @'

@@ -173,6 +173,7 @@ async def acknowledge_alert(
 @router.get("/research", response_model=list[ResearchFindingResponse])
 async def get_research_queue(
     status: str = "pending",
+    limit: int = Query(20, le=50),
     db: AsyncSession = Depends(get_db_session),
 ) -> list:
     try:
@@ -183,7 +184,7 @@ async def get_research_queue(
         select(ResearchReviewQueue)
         .where(ResearchReviewQueue.status == review_status)
         .order_by(ResearchReviewQueue.created_at.desc())
-        .limit(50)
+        .limit(limit)
     )
     return list(result.scalars().all())
 
@@ -217,7 +218,7 @@ async def review_finding(
 
 @router.get("/briefing")
 async def get_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
-    """Return cached briefing for today if available; otherwise generate once."""
+    """Return cached briefing only — never build on page load (use POST /briefing/generate)."""
     today = date.today()
     result = await db.execute(
         select(CeoBriefing).where(CeoBriefing.briefing_date == today)
@@ -225,8 +226,19 @@ async def get_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> dict:
     row = result.scalar_one_or_none()
     if row and row.briefing_json:
         return row.briefing_json
-    agent = CeoCopilotAgent(db)
-    return await agent.generate_daily_briefing()
+    fallback = await db.execute(
+        select(CeoBriefing)
+        .where(CeoBriefing.briefing_json.isnot(None))
+        .order_by(CeoBriefing.briefing_date.desc())
+        .limit(1)
+    )
+    row = fallback.scalar_one_or_none()
+    if row and row.briefing_json:
+        payload = dict(row.briefing_json)
+        payload["_cached_date"] = str(row.briefing_date)
+        payload["_stale"] = row.briefing_date != today
+        return payload
+    return {"ready": False, "briefing_date": str(today)}
 
 
 @router.post("/briefing/generate", dependencies=[Depends(verify_api_key)])
