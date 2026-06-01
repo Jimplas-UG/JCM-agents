@@ -9,6 +9,6 @@ Get-Content $envPath | ForEach-Object {
 if (-not $tok) { throw "TELEGRAM_BOT_TOKEN not in $envPath" }
 $r = Invoke-RestMethod "https://api.telegram.org/bot$tok/getUpdates?limit=10" -TimeoutSec 15
 $chat = $r.result | ForEach-Object { $_.message.chat.id } | Select-Object -Last 1
-if (-not $chat) { throw "No messages yet — message @BilshenzBot first" }
+if (-not $chat) { throw "No messages yet - message @BilshenzBot first" }
 & "C:\Users\Administrator\vps-set-telegram-env.ps1" -BotToken $tok -ChatId ([string]$chat)
 Write-Host "chat_id resolved and saved."
