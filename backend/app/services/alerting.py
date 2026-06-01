@@ -13,6 +13,29 @@ from app.models.tables import Alert
 logger = get_logger("alerting")
 
 
+async def send_telegram_message(text: str, *, parse_mode: str = "Markdown") -> bool:
+    """Send a plain Telegram message when bot token and chat id are configured."""
+    settings = get_settings()
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        logger.info("telegram_skipped", reason="missing_token_or_chat_id")
+        return False
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload: dict[str, Any] = {
+        "chat_id": settings.telegram_chat_id,
+        "text": text,
+    }
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            res = await client.post(url, json=payload)
+            res.raise_for_status()
+        return True
+    except Exception as exc:
+        logger.warning("telegram_send_failed", error=str(exc))
+        return False
+
+
 class AlertService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -48,7 +71,7 @@ class AlertService:
         )
 
         if severity in ("critical", "emergency"):
-            await self._send_telegram(title, message)
+            await send_telegram_message(f"*{title}*\n{message}")
             await self._send_email(title, message)
             alert.telegram_sent = True
             alert.email_sent = True
@@ -56,25 +79,6 @@ class AlertService:
 
         logger.info("alert_created", title=title, severity=severity, agent=agent_source)
         return alert
-
-    async def _send_telegram(self, title: str, message: str) -> None:
-        settings = get_settings()
-        if not settings.telegram_bot_token or not settings.telegram_chat_id:
-            return
-        text = f"*{title}*\n{message}"
-        url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(
-                    url,
-                    json={
-                        "chat_id": settings.telegram_chat_id,
-                        "text": text,
-                        "parse_mode": "Markdown",
-                    },
-                )
-        except Exception as exc:
-            logger.warning("telegram_send_failed", error=str(exc))
 
     async def _send_email(self, title: str, message: str) -> None:
         settings = get_settings()

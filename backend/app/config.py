@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     executive_briefing_minute: int = 0
     executive_briefing_ceo_name: str = "Billy Jimplas"
     executive_briefing_run_agents_before: bool = True
+    executive_briefing_telegram_notify: bool = True
+    mission_control_public_url: str = "http://104.194.140.203:8000"
 
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"

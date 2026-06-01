@@ -25,6 +25,7 @@ from app.config import get_settings
 from app.db.session import AsyncSessionLocal
 from app.logging_config import get_logger, setup_logging
 from app.metrics.prometheus import AGENT_CYCLE_DURATION
+from app.services.alerting import send_telegram_message
 
 setup_logging()
 logger = get_logger("agent_scheduler")
@@ -103,9 +104,33 @@ async def run_daily_executive_briefing() -> None:
             result = await copilot.generate_daily_briefing()
             await db.commit()
             logger.info("daily_executive_briefing_complete", **result)
+            await _notify_executive_briefing_ready(result)
         except Exception as exc:
             await db.rollback()
             logger.error("daily_executive_briefing_failed", error=str(exc))
+
+
+async def _notify_executive_briefing_ready(briefing: dict) -> None:
+    if not settings.executive_briefing_telegram_notify:
+        return
+    base = (settings.mission_control_public_url or "").rstrip("/")
+    mc_url = f"{base}/mission-control" if base else ""
+    bdate = briefing.get("briefing_date", "today")
+    status = briefing.get("mission_status", "—")
+    lines = [
+        "Boss — your *CEO brief is ready*.",
+        f"Date: {bdate} · Status: {status}",
+    ]
+    if mc_url:
+        lines.append(f"Mission Control: {mc_url}")
+    sent = await send_telegram_message("\n".join(lines))
+    if sent:
+        logger.info("executive_briefing_telegram_sent", briefing_date=str(bdate))
+    else:
+        logger.warning(
+            "executive_briefing_telegram_not_sent",
+            hint="Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env",
+        )
 
 
 def main() -> None:
