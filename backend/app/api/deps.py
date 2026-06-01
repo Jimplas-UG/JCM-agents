@@ -97,3 +97,18 @@ async def verify_mission_control_access(
             detail="Invalid CEO Copilot credentials",
             headers={"WWW-Authenticate": 'Basic realm="JCM CEO Copilot"'},
         )
+
+
+async def verify_mission_control_or_api_key(
+    credentials: HTTPBasicCredentials | None = Depends(_mission_control_basic),
+    x_api_key: str | None = Header(None, alias="X-API-Key"),
+) -> None:
+    """Mission Control data APIs — owner Basic Auth or ops X-API-Key."""
+    settings = get_settings()
+    if not settings.mission_control_auth_required:
+        return
+    if x_api_key and settings.api_secret_key and secrets.compare_digest(
+        x_api_key, settings.api_secret_key
+    ):
+        return
+    await verify_mission_control_access(credentials)

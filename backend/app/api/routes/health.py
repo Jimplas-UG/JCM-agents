@@ -15,7 +15,7 @@ from app.agents import (
     QuantMemoryAgent,
     ResearchEvolutionAgent,
 )
-from app.api.deps import get_db_session, verify_api_key
+from app.api.deps import get_db_session, verify_api_key, verify_mission_control_or_api_key
 from app.config import get_settings
 from app.db.redis_client import get_redis
 
@@ -94,7 +94,7 @@ AGENT_INTERVALS = {
 }
 
 
-@router.get("/agents/registry")
+@router.get("/agents/registry", dependencies=[Depends(verify_mission_control_or_api_key)])
 async def agents_registry() -> dict:
     """List all 9 supervisory agents and their schedule (read-only, no cycle execution)."""
     agents = []

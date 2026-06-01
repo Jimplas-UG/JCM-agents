@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.marketing import MarketingAgent
 from app.agents.marketing.content_engine import ContentEngine
-from app.api.deps import get_db_session, verify_api_key
+from app.api.deps import get_db_session, verify_api_key, verify_mission_control_or_api_key
 from app.schemas.marketing import (
     ApproveContentRequest,
     BrandKitResponse,
@@ -17,7 +17,11 @@ from app.schemas.marketing import (
     MarketingTrendResponse,
 )
 
-router = APIRouter(prefix="/marketing", tags=["marketing"])
+router = APIRouter(
+    prefix="/marketing",
+    tags=["marketing"],
+    dependencies=[Depends(verify_mission_control_or_api_key)],
+)
 
 
 @router.get("/brand", response_model=BrandKitResponse)

@@ -357,6 +357,53 @@
       padding: 1.5rem;
     }
     .modal-backdrop.open { display: flex; }
+    .login-gate {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(5,5,5,.92);
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--panel);
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 1.75rem;
+      box-shadow: 0 24px 64px rgba(0,0,0,.5);
+    }
+    .login-card h2 {
+      font-family: Cinzel, serif;
+      color: var(--gold-light);
+      font-size: 1.1rem;
+      margin-bottom: 0.35rem;
+    }
+    .login-card input {
+      width: 100%;
+      margin-top: 0.65rem;
+      padding: 0.65rem 0.75rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--black-soft);
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+    .login-card button {
+      width: 100%;
+      margin-top: 1rem;
+      padding: 0.7rem;
+      border: none;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--gold), var(--gold-dim));
+      color: #050505;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .login-err { color: var(--red); margin-top: 0.65rem; font-size: 0.82rem; }
     .modal {
       background: var(--panel);
       border: 1px solid var(--border-strong);
@@ -434,6 +481,16 @@
   </style>
 </head>
 <body>
+  <div id="login-gate" class="login-gate">
+    <div class="login-card">
+      <h2>JCM Mission Control</h2>
+      <p class="muted">Sign in with your owner credentials</p>
+      <input id="login-user" type="email" autocomplete="username" placeholder="Email" />
+      <input id="login-pass" type="password" autocomplete="current-password" placeholder="Password" />
+      <button type="button" id="login-btn">Sign in</button>
+      <p id="login-err" class="login-err" style="display:none"></p>
+    </div>
+  </div>
   <aside>
     <div class="brand">
       <img src="/mission-control/logo" alt="Bilshenz Strategy" />
@@ -457,7 +514,7 @@
       <span id="status">—</span>
     </header>
     <div class="content">
-      <div id="overview" class="section active"></div>
+      <div id="overview" class="section active"><p class="muted">Loading mission data…</p></div>
       <div id="executive" class="section"></div>
       <div id="regime" class="section"></div>
       <div id="infrastructure" class="section"></div>
@@ -517,8 +574,47 @@
       $("page-title").textContent = label;
     }
 
+    const MC_AUTH_KEY = "mcBasicAuth";
+
+    function getMcAuth() {
+      return sessionStorage.getItem(MC_AUTH_KEY);
+    }
+
+    function setMcAuth(user, pass) {
+      const token = btoa(`${user}:${pass}`);
+      sessionStorage.setItem(MC_AUTH_KEY, token);
+      return token;
+    }
+
+    function clearMcAuth() {
+      sessionStorage.removeItem(MC_AUTH_KEY);
+    }
+
+    function showLoginGate(message) {
+      const gate = $("login-gate");
+      const err = $("login-err");
+      gate.style.display = "flex";
+      if (message) {
+        err.textContent = message;
+        err.style.display = "block";
+      } else {
+        err.style.display = "none";
+      }
+    }
+
+    function hideLoginGate() {
+      $("login-gate").style.display = "none";
+    }
+
     async function get(path) {
-      const r = await fetch(path, { credentials: "same-origin" });
+      const headers = {};
+      const auth = getMcAuth();
+      if (auth) headers.Authorization = `Basic ${auth}`;
+      const r = await fetch(path, { credentials: "include", headers });
+      if (r.status === 401) {
+        clearMcAuth();
+        throw new Error("login_required");
+      }
       if (!r.ok) throw new Error(path + " " + r.status);
       return r.json();
     }
@@ -943,13 +1039,53 @@
           </div>`;
 
         $("status").textContent = "Sync " + new Date().toLocaleTimeString();
+        hideLoginGate();
       } catch (e) {
+        if (e.message === "login_required") {
+          showLoginGate("Session expired. Sign in again.");
+          $("status").textContent = "Sign in required";
+          return;
+        }
         $("status").textContent = "Error: " + e.message;
+        $("overview").innerHTML = `<div class="block"><p class="muted">Could not load data: ${esc(e.message)}</p></div>`;
       }
     }
-    show("overview", "Command Overview");
-    load();
-    setInterval(load, 30000);
+
+    async function boot() {
+      if (!getMcAuth()) {
+        showLoginGate();
+        return;
+      }
+      hideLoginGate();
+      show("overview", "Command Overview");
+      await load();
+      setInterval(load, 30000);
+    }
+
+    $("login-btn").onclick = async () => {
+      const u = $("login-user").value.trim();
+      const p = $("login-pass").value;
+      if (!u || !p) {
+        showLoginGate("Enter email and password.");
+        return;
+      }
+      setMcAuth(u, p);
+      hideLoginGate();
+      $("login-err").style.display = "none";
+      try {
+        await get("/dashboard/overview");
+        await boot();
+      } catch (e) {
+        clearMcAuth();
+        showLoginGate("Invalid credentials. Try again.");
+      }
+    };
+
+    $("login-pass").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("login-btn").click();
+    });
+
+    boot();
   </script>
 </body>
 </html>

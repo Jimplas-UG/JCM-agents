@@ -14,7 +14,7 @@ from app.agents.infra_resilience import InfrastructureResilienceAgent
 from app.agents.performance_intel import PerformanceIntelligenceAgent
 from app.agents.portfolio_risk import PortfolioRiskOrchestrator
 from app.agents.quant_memory import QuantMemoryAgent
-from app.api.deps import get_db_session, verify_api_key
+from app.api.deps import get_db_session, verify_api_key, verify_mission_control_or_api_key
 from app.models.tables import Alert, CeoBriefing, PerformanceDaily, ResearchReviewQueue, ReviewStatus
 from app.schemas.events import (
     AlertResponse,
@@ -25,7 +25,11 @@ from app.schemas.events import (
     TradeEventResponse,
 )
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["dashboard"],
+    dependencies=[Depends(verify_mission_control_or_api_key)],
+)
 
 
 @router.get("/overview", response_model=DashboardOverview)

@@ -4,13 +4,21 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Jcm = "C:/Users/Administrator/Documents/JCM agents/JCM-agents"
 $Local = "$Root\backend\app\static\mission-control.html"
-$Remote = "$Jcm/backend/app/static/mission-control.html"
+$files = @(
+    @{ Local = "$Root\backend\app\static\mission-control.html"; Remote = "$Jcm/backend/app/static/mission-control.html" },
+    @{ Local = "$Root\backend\app\api\deps.py"; Remote = "$Jcm/backend/app/api/deps.py" },
+    @{ Local = "$Root\backend\app\api\routes\dashboard.py"; Remote = "$Jcm/backend/app/api/routes/dashboard.py" },
+    @{ Local = "$Root\backend\app\api\routes\marketing.py"; Remote = "$Jcm/backend/app/api/routes/marketing.py" },
+    @{ Local = "$Root\backend\app\api\routes\health.py"; Remote = "$Jcm/backend/app/api/routes/health.py" },
+    @{ Local = "$Root\backend\app\api\routes\mission_control_ui.py"; Remote = "$Jcm/backend/app/api/routes/mission_control_ui.py" }
+)
 
-if (-not (Test-Path $Local)) { throw "Missing $Local" }
-
-Write-Host "=== Deploy Mission Control UI ===" -ForegroundColor Cyan
-Write-Host "  scp -> jcm-vps:$Remote"
-scp $Local "jcm-vps:$Remote"
+Write-Host "=== Deploy Mission Control UI + auth fix ===" -ForegroundColor Cyan
+foreach ($f in $files) {
+    if (-not (Test-Path $f.Local)) { throw "Missing $($f.Local)" }
+    Write-Host "  scp $($f.Local)"
+    scp $f.Local "jcm-vps:$($f.Remote)"
+}
 
 $remotePs1 = @'
 $Jcm = "C:\Users\Administrator\Documents\JCM agents\JCM-agents"
