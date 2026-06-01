@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     mission_control_public_url: str = "http://104.194.140.203:8000"
     marketing_auto_approve: bool = False
 
+    cloudzy_subscription_expires: str = ""
+    cursor_subscription_expires: str = ""
+
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"
     metrics_require_auth: bool = True

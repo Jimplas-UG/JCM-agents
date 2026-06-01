@@ -1,0 +1,23 @@
+{
+  "updated_at": "2026-06-01T23:00:23.129023Z",
+  "subscriptions": [
+    {
+      "id": "cloudzy",
+      "label": "Cloudzy VPS",
+      "expires_on": "2026-06-23",
+      "renew_url": "https://cloudzy.com",
+      "source": "manual"
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor Pro",
+      "expires_on": "2026-06-08",
+      "plan": "pro",
+      "billing_status": "active",
+      "renew_url": "https://cursor.com/settings",
+      "source": "estimated_monthly_from_signup",
+      "notes": "Next monthly renewal estimated from Cursor signup 2026-05-08. Confirm at cursor.com/settings.",
+      "billing_status": "active"
+    }
+  ]
+}

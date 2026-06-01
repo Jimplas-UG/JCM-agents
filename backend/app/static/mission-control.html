@@ -246,6 +246,21 @@
       font-family: "DM Sans", monospace;
       color: var(--gold-light);
     }
+    .card .val-regime {
+      font-size: clamp(0.9rem, 2.2vw, 1.15rem);
+      line-height: 1.3;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      hyphens: auto;
+      max-width: 100%;
+    }
+    .card-regime {
+      grid-column: 1 / -1;
+      min-width: 0;
+    }
+    @media (min-width: 640px) {
+      .card-regime { grid-column: span 2; }
+    }
     .block {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -637,7 +652,7 @@
     function paintOverview(ov) {
       $("bsv32-badge").textContent = `BSv3.2 ${ov.bsv32_status || "unknown"}`;
       $("bsv32-badge").className = "badge " + (ov.system_running ? "badge-ok" : "badge-warn");
-      $("regime-badge").textContent = `${ov.market_regime || "unknown"} regime`;
+      $("regime-badge").textContent = `${formatRegimeLabel(ov.market_regime)} regime`;
       $("regime-badge").className = "badge badge-gold";
       $("overview").innerHTML = hero("Mission Control Snapshot", "Real-time supervisory intelligence across the BSv3.2 stack") + cards([
         ["Live P&L", "$" + fmt(ov.live_pnl), ov.live_pnl >= 0 ? "var(--green)" : "var(--red)"],
@@ -662,10 +677,73 @@
         </div>`;
     }
 
+    function formatRegimeLabel(regime) {
+      const r = String(regime || "unknown").trim();
+      if (!r || r === "unknown") return "Unknown";
+      return r.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    }
+
     function cards(items) {
-      return `<div class="grid">${items.map(([l,v,c]) =>
-        `<div class="card"><h3>${l}</h3><div class="val" style="color:${c||"var(--gold-light)"}">${esc(v)}</div></div>`
-      ).join("")}</div>`;
+      return `<div class="grid">${items.map(([l, v, c, extraClass]) => {
+        const isRegime = l === "Regime";
+        const cardCls = ["card", extraClass || (isRegime ? "card-regime" : "")].filter(Boolean).join(" ");
+        const valCls = isRegime ? "val val-regime" : "val";
+        return `<div class="${cardCls}"><h3>${esc(l)}</h3><div class="${valCls}" style="color:${c || "var(--gold-light)"}">${v}</div></div>`;
+      }).join("")}</div>`;
+    }
+
+    function paintRegimePanel(ov, bsv32, perfBase, perf) {
+      const sys = bsv32 || {
+        market_regime: ov.market_regime,
+        nfp_blackout: ov.nfp_blackout,
+        status: ov.bsv32_status,
+      };
+      const regimeLabel = formatRegimeLabel(sys.market_regime || ov.market_regime);
+      const winRate = perfBase?.win_rate != null
+        ? (perfBase.win_rate * 100).toFixed(1) + "%"
+        : (perf?.win_rate != null ? (perf.win_rate * 100).toFixed(1) + "%" : "—");
+      const hasPerf = perfBase || perf;
+      $("regime").innerHTML = hero("Market Regime Analysis", "BSv3.2 regime classification and baseline performance") + `
+        <div class="block"><h3>Current Regime</h3>
+          ${cards([
+            ["Regime", esc(regimeLabel)],
+            ["NFP Blackout", sys.nfp_blackout ? "ACTIVE" : "Clear", sys.nfp_blackout ? "var(--amber)" : "var(--green)"],
+            ["System Status", esc(formatRegimeLabel(sys.status || ov.bsv32_status || "unknown"))],
+            ["Win Rate", winRate],
+          ])}
+        </div>
+        ${hasPerf ? `<div class="block"><h3>Performance vs Baseline</h3>
+          ${cards([
+            ["Expectancy", fmt(perfBase?.expectancy ?? perf?.expectancy)],
+            ["Edge Decay", fmt(perfBase?.edge_decay_score ?? perf?.edge_decay_score, 2)],
+            ["Anomalies", (perfBase?.anomaly_flags || perf?.anomaly_flags || []).length || 0],
+          ])}
+          ${(perfBase?.anomaly_flags || []).length ? `<p class="muted" style="margin-top:.75rem">${esc(perfBase.anomaly_flags.join(", "))}</p>` : ""}
+        </div>` : `<div class="block"><p class="muted">Performance metrics loading…</p></div>`}`;
+      $("regime-badge").textContent = `${regimeLabel} regime`;
+      $("regime-badge").className = "badge badge-gold";
+    }
+
+    function renderSubscriptionReminders(sub) {
+      const list = sub?.subscriptions || [];
+      if (!list.length) return "";
+      const rows = list.map((s) => {
+        const st = s.status || "ok";
+        const cls = st === "expired" || st === "urgent" ? "badge-err" : st === "soon" ? "badge-warn" : "badge-ok";
+        const days = s.days_left;
+        const daysLabel = days == null ? "—" : days < 0 ? `${Math.abs(days)}d overdue` : `${days} days left`;
+        const meta = [s.plan, s.billing_status].filter(Boolean).join(" · ");
+        return `<div class="svc">
+          <div>
+            <strong>${esc(s.label)}</strong>
+            ${meta ? `<div class="muted">${esc(meta)}</div>` : ""}
+            <div class="muted">Expires ${esc(s.display_date || s.expires_on)} · ${esc(daysLabel)}</div>
+            ${s.notes ? `<div class="muted" style="font-size:.8rem;margin-top:.25rem">${esc(s.notes)}</div>` : ""}
+          </div>
+          <span class="badge ${cls}">${st === "expired" ? "EXPIRED" : st.toUpperCase()}</span>
+        </div>`;
+      }).join("");
+      return `<div class="block"><h3>Subscription renewals</h3><p class="muted" style="margin-bottom:.75rem">Always visible — renew before expiry to avoid downtime.</p>${rows}</div>`;
     }
 
     function pctRate(n, decimals = 1) {
@@ -942,30 +1020,14 @@
             ["Infra Score", fmt((b.infrastructure?.health_score||0)*100,0)+"%"],
           ])}
         </div>`;
-      $("regime").innerHTML = hero("Market Regime Analysis", "BSv3.2 regime classification and baseline performance") + `
-        <div class="block"><h3>Current Regime</h3>
-          ${cards([
-            ["Regime", esc(b.bsv32_system?.market_regime || ov.market_regime)],
-            ["NFP Blackout", b.bsv32_system?.nfp_blackout ? "ACTIVE" : "Clear", b.bsv32_system?.nfp_blackout ? "var(--amber)" : "var(--green)"],
-            ["System Status", esc(b.bsv32_system?.status)],
-            ["Win Rate", perfBase.win_rate != null ? (perfBase.win_rate*100).toFixed(1)+"%" : (perf?.win_rate != null ? (perf.win_rate*100).toFixed(1)+"%" : "—")],
-          ])}
-        </div>
-        <div class="block"><h3>Performance vs Baseline</h3>
-          ${cards([
-            ["Expectancy", fmt(perfBase.expectancy ?? perf?.expectancy)],
-            ["Edge Decay", fmt(perfBase.edge_decay_score ?? perf?.edge_decay_score, 2)],
-            ["Anomalies", (perfBase.anomaly_flags||perf?.anomaly_flags||[]).length || 0],
-          ])}
-          ${(perfBase.anomaly_flags||[]).length ? `<p class="muted" style="margin-top:.75rem">${esc(perfBase.anomaly_flags.join(", "))}</p>` : ""}
-        </div>`;
+      paintRegimePanel(ov, b.bsv32_system, perfBase, perf);
     }
 
     function paintSecondaryPanels(ov, infra, risk, perf, execQ, trades, mktStats, mktQueue, mktTrends, alerts, research) {
       if (infra?.current) {
         const svc = infra.current.services || {};
         const v = infra.current.vps || {};
-        $("infrastructure").innerHTML = hero("Infrastructure Command", "VPS, APIs, and execution layer health") + `
+        $("infrastructure").innerHTML = hero("Infrastructure Command", "VPS, APIs, subscriptions, and execution layer health") + `
           <div style="margin-bottom:1rem">${badge(infra.current.healthy, infra.current.healthy ? "All Systems Operational" : "Degraded")}</div>
           <div class="block"><h3>Service Endpoints</h3>
             ${Object.entries(svc).map(([n,s]) =>
@@ -974,7 +1036,12 @@
           </div>
           <div class="block"><h3>VPS Resources</h3>
             ${cards([["CPU", fmt(v.cpu_pct,1)+"%"], ["RAM", fmt(v.ram_pct,1)+"%"], ["Disk", fmt(v.disk_pct,1)+"%"]])}
-          </div>`;
+          </div>
+          ${renderSubscriptionReminders(infra.subscriptions)}`;
+      } else if (infra?.subscriptions?.subscriptions?.length) {
+        $("infrastructure").innerHTML = hero("Infrastructure Command", "VPS, APIs, subscriptions, and execution layer health")
+          + `<div class="block"><p class="muted">Live health metrics loading…</p></div>`
+          + renderSubscriptionReminders(infra.subscriptions);
       }
 
       $("analytics").innerHTML = hero("Quant Analytics", "Performance intelligence and execution quality") + `
@@ -1059,12 +1126,14 @@
 
         const ov = await get("/dashboard/overview", 12000);
         paintOverview(ov);
+        paintRegimePanel(ov);
 
         const registryP = get("/agents/registry", 12000);
+        const perfP = get("/dashboard/performance", 12000).catch(() => null);
         const panelsP = Promise.allSettled([
           get("/dashboard/infrastructure", 15000),
           get("/dashboard/risk", 12000).catch(() => null),
-          get("/dashboard/performance", 12000).catch(() => null),
+          perfP,
           get("/dashboard/execution-quality", 12000).catch(() => null),
           get("/dashboard/trades?limit=25", 12000).catch(() => []),
           get("/marketing/stats", 12000).catch(() => null),
@@ -1074,12 +1143,13 @@
           get("/dashboard/alerts?limit=12", 12000).catch(() => []),
           get("/dashboard/research?status=pending&limit=10", 12000).catch(() => []),
         ]);
-        const briefingP = get("/dashboard/briefing", 15000).catch(() => null);
+        const briefingP = get("/dashboard/briefing", 8000).catch(() => null);
 
-        const [registry, panelResults, briefingRaw] = await Promise.all([
+        const [registry, panelResults, briefingRaw, perfEarly] = await Promise.all([
           registryP,
           panelsP,
           briefingP,
+          perfP,
         ]);
         paintAgents(registry);
 
@@ -1090,11 +1160,14 @@
         const mktQueue = [...(mktDraft || []), ...(mktApproved || [])];
         const briefing = briefingRaw && briefingRaw.ready === false ? null : briefingRaw;
 
+        const perfResolved = perf || perfEarly;
         if (briefing) {
-          paintBriefingPanels(briefing, ov, perf);
-        } else if (initial || !$("executive").innerHTML.includes("Executive")) {
-          $("executive").innerHTML = hero("Executive Briefing", "Awaiting CEO Copilot data") + `<div class="block"><p class="muted">Briefing will populate on next agent cycle (09:00 Kampala)</p></div>`;
-          $("regime").innerHTML = hero("Market Regime", esc(ov.market_regime || "unknown"));
+          paintBriefingPanels(briefing, ov, perfResolved);
+        } else {
+          paintRegimePanel(ov, null, null, perfResolved);
+          if (initial || !$("executive").innerHTML.includes("Executive")) {
+            $("executive").innerHTML = hero("Executive Briefing", "Awaiting CEO Copilot data") + `<div class="block"><p class="muted">Briefing will populate on next agent cycle (09:00 Kampala)</p></div>`;
+          }
         }
 
         paintSecondaryPanels(ov, infra, risk, perf, execQ, trades, mktStats, mktQueue, mktTrends, alerts, research);

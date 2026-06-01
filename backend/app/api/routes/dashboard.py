@@ -96,7 +96,13 @@ async def get_infrastructure(
             },
             "mt5_connected": latest.mt5_connected,
         }
-    return {"current": current, "latest_log_id": str(latest.id) if latest else None}
+    from app.services.subscription_reminders import get_subscription_reminders
+
+    return {
+        "current": current,
+        "latest_log_id": str(latest.id) if latest else None,
+        "subscriptions": get_subscription_reminders(),
+    }
 
 
 @router.get("/execution-quality")

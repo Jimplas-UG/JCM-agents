@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     marketing_cycle_hours: int = 24
     marketing_auto_approve: bool = False
 
+    cloudzy_subscription_expires: str = ""
+    cursor_subscription_expires: str = ""
+
     executive_briefing_timezone: str = "Africa/Kampala"
     executive_briefing_hour: int = 9
     executive_briefing_minute: int = 0
