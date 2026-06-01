@@ -529,6 +529,78 @@
       ).join("")}</div>`;
     }
 
+    function pctRate(n, decimals = 1) {
+      if (n == null || n === "") return "—";
+      return (Number(n) * 100).toFixed(decimals) + "%";
+    }
+
+    function pipVal(n) {
+      if (n == null || n === "") return "—";
+      return Number(n).toFixed(2) + " pips";
+    }
+
+    function msVal(n) {
+      if (n == null || n === "") return "—";
+      return Math.round(Number(n)) + " ms";
+    }
+
+    function renderExecutionQuality(eq) {
+      if (!eq) return `<p class="muted">Awaiting trade execution data</p>`;
+      if (eq.message === "no_execution_data" || ((eq.sample_size ?? 0) === 0 && eq.avg_slippage_pips == null)) {
+        return `<p class="muted">No execution samples in the last 24 hours. Metrics appear here after live fills are logged.</p>`;
+      }
+      const trend = eq.slippage_trend || {};
+      const trendLabel = trend.worsening ? "Worsening" : "Stable";
+      const trendColor = trend.worsening ? "var(--amber)" : "var(--green)";
+      const anomalies = eq.anomaly_count ?? 0;
+      let html = cards([
+        ["Trades Analyzed", eq.sample_size ?? 0],
+        ["Avg Slippage", pipVal(eq.avg_slippage_pips)],
+        ["Avg Fill Speed", msVal(eq.avg_fill_speed_ms)],
+        ["Rejection Rate", pctRate(eq.rejection_rate)],
+        ["Anomalies", anomalies, anomalies > 0 ? "var(--amber)" : "var(--green)"],
+      ]);
+      html += `<div style="margin-top:1rem;padding-top:.75rem;border-top:1px solid var(--border)">
+        <p class="muted" style="font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.5rem">Slippage trend · last 24h vs prior 24h</p>
+        <div class="svc"><span>Recent period</span><span>${pipVal(trend.recent_avg)}</span></div>
+        <div class="svc"><span>Prior period</span><span>${pipVal(trend.prior_avg)}</span></div>
+        <div class="svc"><span>Trend</span><span style="color:${trendColor};font-weight:600">${trendLabel}</span></div>
+      </div>`;
+      if (eq.recommendation) {
+        html += `<p style="margin-top:.85rem;padding:.75rem 1rem;border-left:3px solid var(--amber);background:rgba(251,191,36,.08);font-size:.9rem;line-height:1.45"><strong>Recommendation:</strong> ${esc(eq.recommendation)}</p>`;
+      } else if (!trend.worsening) {
+        html += `<p class="muted" style="margin-top:.75rem">Execution quality is within normal range.</p>`;
+      }
+      return html;
+    }
+
+    function renderPerformanceIntel(perf) {
+      if (!perf) return `<p class="muted">Daily report generates on the performance intelligence schedule.</p>`;
+      const flags = perf.anomaly_flags || [];
+      const wr = perf.win_rate != null ? (perf.win_rate * 100).toFixed(1) + "%" : "—";
+      const pnl = perf.total_pnl_usd;
+      const pnlColor = pnl == null ? null : pnl >= 0 ? "var(--green)" : "var(--red)";
+      let html = `<p class="muted" style="margin-bottom:.75rem">Report date: <strong style="color:var(--text)">${esc(perf.report_date || "—")}</strong></p>`;
+      html += cards([
+        ["Trades", perf.total_trades ?? 0],
+        ["Win Rate", wr],
+        ["Expectancy", fmt(perf.expectancy)],
+        ["Avg R-Multiple", fmt(perf.avg_r_multiple)],
+        ["Total P&L", "$" + fmt(perf.total_pnl_usd), pnlColor],
+        ["Edge Decay", fmt(perf.edge_decay_score, 2)],
+      ]);
+      if (flags.length) {
+        html += `<p class="muted" style="margin-top:.85rem;margin-bottom:.35rem"><strong>Anomaly flags</strong></p><ul style="margin-left:1.15rem;line-height:1.5;color:var(--amber)">`;
+        flags.forEach((f) => {
+          html += `<li>${esc(typeof f === "string" ? f : String(f))}</li>`;
+        });
+        html += `</ul>`;
+      } else {
+        html += `<p class="muted" style="margin-top:.75rem">No performance anomalies flagged.</p>`;
+      }
+      return html;
+    }
+
     function hero(title, meta) {
       return `<div class="hero"><div class="hero-label">CEO Copilot</div><div class="hero-title">${title}</div><div class="hero-meta">${meta}</div></div>`;
     }
@@ -802,16 +874,10 @@
             ${tradeHistoryTable(trades)}
           </div>
           <div class="block"><h3>Performance Intelligence</h3>
-            ${perf ? cards([
-              ["Trades Today", perf.total_trades ?? 0],
-              ["Win Rate", perf.win_rate != null ? (perf.win_rate*100).toFixed(1)+"%" : "—"],
-              ["Expectancy", fmt(perf.expectancy)],
-              ["Total P&L", "$"+fmt(perf.total_pnl_usd)],
-              ["Edge Decay", fmt(perf.edge_decay_score, 2)],
-            ]) : `<p class="muted">Daily report generates on performance_intel schedule</p>`}
+            ${renderPerformanceIntel(perf)}
           </div>
           <div class="block"><h3>Execution Quality</h3>
-            ${execQ ? `<div class="prose">${esc(JSON.stringify(execQ, null, 2))}</div>` : `<p class="muted">Awaiting trade execution data</p>`}
+            ${renderExecutionQuality(execQ)}
           </div>
           ${risk ? `<div class="block"><h3>Risk Orchestrator</h3>${cards([
             ["Risk Score", fmt(risk.risk_score,1)],
