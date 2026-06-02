@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     executive_briefing_telegram_notify: bool = True
     mission_control_public_url: str = "http://104.194.140.203:8000"
     mission_control_live_poll_seconds: int = 5
+    ws_token_ttl_seconds: int = 3600
 
     prometheus_enabled: bool = True
     metrics_path: str = "/metrics"

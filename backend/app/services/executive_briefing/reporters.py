@@ -120,10 +120,15 @@ def report_performance_intel(ctx: BriefingContext) -> AgentReport:
 
 
 def report_infra_resilience(ctx: BriefingContext) -> AgentReport:
-    live = ctx.infra_live or {}
-    healthy = live.get("healthy", False)
-    svc = live.get("services", {})
     infra = ctx.infra
+    live = ctx.infra_live or {}
+    svc = live.get("services", {})
+    if live:
+        healthy = live.get("healthy", False)
+    elif infra:
+        healthy = bool(infra.mt5_connected and infra.desk_api_ok and infra.forward_bot_ok)
+    else:
+        healthy = False
     mt5 = svc.get("mt5", {}).get("ok", infra.mt5_connected if infra else False)
     fwd = svc.get("forward_bot", {}).get("ok", infra.forward_bot_ok if infra else False)
 

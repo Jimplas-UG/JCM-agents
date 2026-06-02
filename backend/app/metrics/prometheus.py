@@ -59,5 +59,18 @@ MARKETING_CONTENT_QUEUE = Gauge(
 )
 
 
+def update_operational_gauges(result: dict) -> None:
+    """Update gauges from agent cycle results when present."""
+    if "risk_score" in result:
+        RISK_SCORE.set(float(result["risk_score"]))
+    if "infra_health_score" in result:
+        INFRA_HEALTH.set(float(result["infra_health_score"]))
+    if "system_running" in result:
+        BSV32_STATUS.set(1.0 if result.get("system_running") else 0.0)
+    alerts = result.get("active_alerts")
+    if isinstance(alerts, int):
+        ACTIVE_ALERTS.labels(severity="all").set(alerts)
+
+
 def metrics_response() -> bytes:
     return generate_latest()

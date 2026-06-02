@@ -184,12 +184,7 @@ async def load_briefing_context(db: AsyncSession, today: date | None = None) -> 
         ).scalars().all()
     )
 
-    try:
-        from app.agents.infra_resilience import InfrastructureResilienceAgent
-
-        infra_agent = InfrastructureResilienceAgent(db)
-        ctx.infra_live = await infra_agent.check_all_systems()
-    except Exception:
-        ctx.infra_live = None
+    # Use persisted InfraHealthLog only — live probes run on infra_resilience schedule.
+    ctx.infra_live = None
 
     return ctx

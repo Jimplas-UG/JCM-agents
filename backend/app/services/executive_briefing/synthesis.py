@@ -28,7 +28,12 @@ def build_executive_summary(
     equity = float(ctx.state.account_equity or 0) if ctx.state else 0
     open_n = len(ctx.open_trades)
     drafts = len(ctx.marketing_drafts)
-    infra_ok = ctx.infra_live.get("healthy", False) if ctx.infra_live else False
+    if ctx.infra_live:
+        infra_ok = ctx.infra_live.get("healthy", False)
+    elif ctx.infra:
+        infra_ok = bool(ctx.infra.mt5_connected and ctx.infra.desk_api_ok and ctx.infra.forward_bot_ok)
+    else:
+        infra_ok = False
 
     paras = [
         (
@@ -142,7 +147,14 @@ def build_action_board(ctx: BriefingContext, reports: list[AgentReport]) -> list
     rows: list[ActionRow] = []
     prio = 1
 
-    if ctx.infra_live and not ctx.infra_live.get("healthy"):
+    infra_bad = (
+        ctx.infra_live and not ctx.infra_live.get("healthy")
+    ) or (
+        not ctx.infra_live
+        and ctx.infra
+        and not (ctx.infra.mt5_connected and ctx.infra.desk_api_ok and ctx.infra.forward_bot_ok)
+    )
+    if infra_bad:
         rows.append(
             ActionRow(
                 priority=prio,

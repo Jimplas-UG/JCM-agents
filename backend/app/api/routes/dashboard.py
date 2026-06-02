@@ -24,6 +24,8 @@ from app.schemas.events import (
     ResearchReviewRequest,
     TradeEventResponse,
 )
+from app.services.agent_orchestrator import get_action_audit
+from app.services.live_dashboard import build_live_tick
 
 router = APIRouter(
     prefix="/dashboard",
@@ -43,9 +45,17 @@ async def get_overview(
 
 @router.get("/live-tick", response_model=DashboardOverview)
 async def get_live_tick(db: AsyncSession = Depends(get_db_session)) -> dict:
-    """Lightweight poll endpoint for Mission Control (MT5-connected metrics)."""
-    agent = CeoCopilotAgent(db)
-    return await agent.get_dashboard_overview(live=True)
+    """Lightweight poll — cached mission snapshot + MT5 (no full briefing context)."""
+    return await build_live_tick(db, use_mt5=True)
+
+
+@router.get("/audit-trail")
+async def get_audit_trail(
+    limit: int = Query(50, le=200),
+) -> dict:
+    """Orchestrator action audit (remediations, validation warnings, bus messages)."""
+    items = await get_action_audit(limit=limit)
+    return {"count": len(items), "items": items}
 
 
 @router.get("/trades", response_model=list[TradeEventResponse])

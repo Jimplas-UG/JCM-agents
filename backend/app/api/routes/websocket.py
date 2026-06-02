@@ -3,15 +3,18 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
+from app.config import get_settings
 from app.db.redis_client import (
+    CHANNEL_AGENT_BUS,
     CHANNEL_ALERTS,
     CHANNEL_DASHBOARD,
     CHANNEL_SYSTEM_STATE,
     CHANNEL_TRADE_EVENTS,
     get_redis,
 )
+from app.services.ws_auth import verify_ws_token
 
 router = APIRouter(tags=["websocket"])
 
@@ -50,7 +53,6 @@ _redis_listener_lock = asyncio.Lock()
 
 
 async def _redis_broadcast_loop() -> None:
-    """Single shared Redis subscriber — avoids N duplicate listeners per WebSocket."""
     redis = await get_redis()
     pubsub = redis.pubsub()
     await pubsub.subscribe(
@@ -58,6 +60,7 @@ async def _redis_broadcast_loop() -> None:
         CHANNEL_SYSTEM_STATE,
         CHANNEL_ALERTS,
         CHANNEL_DASHBOARD,
+        CHANNEL_AGENT_BUS,
     )
     try:
         async for message in pubsub.listen():
@@ -86,7 +89,16 @@ async def _ensure_redis_listener() -> None:
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket) -> None:
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str | None = Query(None, description="Mission Control WS token"),
+) -> None:
+    settings = get_settings()
+    if settings.mission_control_auth_required:
+        if not token or not verify_ws_token(token):
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+
     await _ensure_redis_listener()
     await manager.connect(websocket)
     try:

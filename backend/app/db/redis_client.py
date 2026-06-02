@@ -13,6 +13,7 @@ CHANNEL_TRADE_EVENTS = "jcm:trade_events"
 CHANNEL_SYSTEM_STATE = "jcm:system_state"
 CHANNEL_ALERTS = "jcm:alerts"
 CHANNEL_DASHBOARD = "jcm:dashboard"
+CHANNEL_AGENT_BUS = "jcm:agent_bus"
 
 
 async def get_redis() -> aioredis.Redis:

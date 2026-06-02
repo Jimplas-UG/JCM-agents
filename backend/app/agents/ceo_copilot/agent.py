@@ -13,7 +13,10 @@ from app.db.redis_client import CHANNEL_DASHBOARD, publish
 from app.models.tables import Alert, AlertSeverity, CeoBriefing
 from app.services.executive_briefing.context import load_briefing_context
 from app.services.executive_briefing.service import build_executive_briefing, briefing_to_legacy_payload
+from app.services.agent_guard import validate_briefing_against_snapshot
+from app.services.agent_orchestrator import publish_agent_message
 from app.services.live_dashboard import _infra_health_score, build_live_overview
+from app.services.mission_memory import load_mission_snapshot
 
 
 class CeoCopilotAgent(BaseAgent):
@@ -21,18 +24,46 @@ class CeoCopilotAgent(BaseAgent):
     description = "Daily executive briefing and mission-control dashboard data"
 
     async def run_cycle(self) -> dict[str, Any]:
-        briefing = await self.generate_daily_briefing()
-        await publish(CHANNEL_DASHBOARD, json.dumps(briefing, default=str))
+        """Refresh live overview + snapshot; full briefing only once per day unless forced."""
+        overview = await build_live_overview(self.db, use_mt5=True)
+        await publish(
+            CHANNEL_DASHBOARD,
+            json.dumps(
+                {
+                    "type": "overview_refresh",
+                    "briefing_date": str(date.today()),
+                    "mission_status": overview.get("bsv32_status"),
+                    "live_pnl": overview.get("live_pnl"),
+                },
+                default=str,
+            ),
+        )
         return {
             "status": "ok",
-            "briefing_date": str(briefing.get("briefing_date")),
-            "mission_status": briefing.get("mission_status"),
+            "mode": "overview_refresh",
+            "briefing_date": str(date.today()),
+            "system_running": overview.get("system_running"),
+            "risk_score": overview.get("risk_score"),
+            "infra_health_score": overview.get("infra_health_score"),
+            "active_alerts": overview.get("active_alerts"),
         }
 
-    async def generate_daily_briefing(self, briefing_date: date | None = None) -> dict[str, Any]:
+    async def generate_daily_briefing(
+        self, briefing_date: date | None = None, *, force: bool = False
+    ) -> dict[str, Any]:
         today = briefing_date or date.today()
-        doc = await build_executive_briefing(self.db, today)
-        ctx = await load_briefing_context(self.db, today)
+
+        if not force:
+            existing = await self.db.execute(
+                select(CeoBriefing).where(CeoBriefing.briefing_date == today)
+            )
+            row = existing.scalar_one_or_none()
+            if row and row.briefing_json:
+                cached = dict(row.briefing_json)
+                cached["from_cache"] = True
+                return cached
+
+        doc, ctx = await build_executive_briefing(self.db, today)
         briefing = briefing_to_legacy_payload(doc, ctx)
 
         briefing["alerts"] = [
@@ -66,14 +97,30 @@ class CeoCopilotAgent(BaseAgent):
             for m in ctx.marketing_drafts[:10]
         ]
 
+        snapshot = await load_mission_snapshot() or {}
+        validation = validate_briefing_against_snapshot(
+            briefing,
+            {
+                "live_pnl": snapshot.get("live_pnl"),
+                "floating_pnl": snapshot.get("live_pnl"),
+                "risk_score": snapshot.get("risk_score"),
+            },
+        )
+        briefing["validation"] = validation
+        if not validation.get("verified"):
+            await publish_agent_message(
+                self.name,
+                "briefing_validation_warning",
+                validation,
+                priority="high",
+            )
+
         await self._persist_briefing(today, briefing, ctx)
+        briefing["from_cache"] = False
         return briefing
 
     async def get_dashboard_overview(self, *, live: bool = True) -> dict[str, Any]:
-        """Read-only overview — MT5 live P&L/positions when bridge is connected."""
-        if live:
-            return await build_live_overview(self.db, use_mt5=True)
-        return await build_live_overview(self.db, use_mt5=False)
+        return await build_live_overview(self.db, use_mt5=live)
 
     async def _persist_briefing(self, today: date, briefing: dict, ctx: Any) -> None:
         state = ctx.state

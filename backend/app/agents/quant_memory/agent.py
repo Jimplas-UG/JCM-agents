@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
-from app.db.redis_client import CHANNEL_TRADE_EVENTS, publish
+from app.db.redis_client import CHANNEL_SYSTEM_STATE, CHANNEL_TRADE_EVENTS, publish
 from app.models.tables import (
     Bsv32FilterName,
     EventType,
@@ -240,6 +240,25 @@ class QuantMemoryAgent(BaseAgent):
         )
         self.db.add(snapshot)
         await self.db.flush()
+        await publish(
+            CHANNEL_SYSTEM_STATE,
+            json.dumps(
+                {
+                    "bsv32_status": data.bsv32_status,
+                    "open_positions": data.open_positions,
+                    "floating_pnl": float(data.floating_pnl or 0),
+                    "mt5_connected": data.mt5_connected,
+                    "at": datetime.now(timezone.utc).isoformat(),
+                },
+                default=str,
+            ),
+        )
+        try:
+            from app.workers.agent_scheduler import mark_ingest_activity
+
+            mark_ingest_activity("quant_memory")
+        except Exception:
+            pass
         return snapshot
 
     async def on_event(self, event_type: str, payload: dict[str, Any]) -> None:

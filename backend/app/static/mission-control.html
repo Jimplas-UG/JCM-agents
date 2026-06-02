@@ -652,6 +652,14 @@
     let latestOverview = null;
     let liveTickInFlight = false;
     let missionWs = null;
+    let mcWsToken = null;
+    const LIVE_POLL_MS = 5000;
+    let wsTickDebounce = null;
+
+    function scheduleLiveTick() {
+      if (wsTickDebounce) clearTimeout(wsTickDebounce);
+      wsTickDebounce = setTimeout(() => refreshLiveTick(), 2000);
+    }
 
     function overviewMetricCards(ov) {
       const src = ov.data_source === "mt5_live" ? "MT5 live" : "DB snapshot";
@@ -771,28 +779,72 @@
       }
     }
 
-    function connectMissionWs() {
+    async function fetchWsToken() {
+      const auth = getMcAuth();
+      if (!auth) return null;
+      try {
+        const r = await fetch("/mission-control/ws-token", {
+          method: "POST",
+          credentials: "include",
+          headers: { Authorization: `Basic ${auth}` },
+        });
+        if (!r.ok) return null;
+        const j = await r.json();
+        return j.token || null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    async function connectMissionWs() {
       if (missionWs && (missionWs.readyState === WebSocket.OPEN || missionWs.readyState === WebSocket.CONNECTING)) {
         return;
       }
+      if (!mcWsToken && getMcAuth()) {
+        mcWsToken = await fetchWsToken();
+      }
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      missionWs = new WebSocket(`${proto}//${location.host}/ws`);
-      missionWs.onmessage = () => { refreshLiveTick(); };
-      missionWs.onclose = () => {
+      const qs = mcWsToken ? `?token=${encodeURIComponent(mcWsToken)}` : "";
+      missionWs = new WebSocket(`${proto}//${location.host}/ws${qs}`);
+      missionWs.onmessage = () => { scheduleLiveTick(); };
+      missionWs.onclose = (ev) => {
         missionWs = null;
+        if (ev.code === 1008) mcWsToken = null;
         setTimeout(connectMissionWs, 5000);
       };
     }
 
-    function paintAgents(registry) {
-      $("agents").innerHTML = hero("Agent Network", `${registry.count} supervisory agents · read-only observer mode`) + `
+    function paintAgents(registry, health, audit) {
+      const hm = {};
+      (health?.agents || []).forEach((h) => { hm[h.name] = h; });
+      const auditRows = (audit?.items || []).slice(0, 20).map((e) => `<tr>
+        <td>${esc((e.at || "").slice(0, 19))}</td>
+        <td>${esc(e.agent || "")}</td>
+        <td>${esc(e.action || "")}</td>
+        <td>${esc(e.priority || "")}</td>
+      </tr>`).join("");
+      const auditBlock = auditRows
+        ? `<div class="block"><h3>Action audit (orchestrator)</h3>
+          <table class="data-table"><thead><tr><th>Time (UTC)</th><th>Agent</th><th>Action</th><th>Priority</th></tr></thead>
+          <tbody>${auditRows}</tbody></table></div>`
+        : `<div class="block"><h3>Action audit</h3><p class="muted">No orchestrator actions logged yet</p></div>`;
+      $("agents").innerHTML = hero("Agent Network", `${registry.count} agents · institutional health monitoring`) + `
         <div class="block"><h3>Registered Agents</h3>
-          ${(registry.agents||[]).map(a => `
+          ${(registry.agents||[]).map(a => {
+            const h = hm[a.name] || {};
+            const score = h.health_score != null ? h.health_score : "—";
+            const st = h.status || "unknown";
+            const color = st === "healthy" ? "var(--green)" : st === "degraded" ? "var(--amber)" : "var(--muted)";
+            const issues = (h.validation_issues || []).length ? ` · ${h.validation_issues.length} flag(s)` : "";
+            return `
             <div class="agent">
-              <span class="agent-name">${esc(a.name.replace(/_/g," "))}</span><span class="tag">${esc(a.interval_label)}</span>
+              <span class="agent-name">${esc(a.name.replace(/_/g," "))}</span>
+              <span class="tag">${esc(a.interval_label)}</span>
+              <span class="tag" style="color:${color}">${esc(st)} · ${score}${esc(issues)}</span>
               <div class="muted" style="margin-top:.35rem">${esc(a.description)}</div>
-            </div>`).join("")}
-        </div>`;
+            </div>`;
+          }).join("")}
+        </div>${auditBlock}`;
     }
 
     function formatRegimeLabel(regime) {
@@ -1247,6 +1299,8 @@
         paintRegimePanel(ov);
 
         const registryP = get("/agents/registry", 12000);
+        const agentsHealthP = get("/agents/health", 12000).catch(() => ({ agents: [] }));
+        const auditP = get("/dashboard/audit-trail?limit=30", 12000).catch(() => ({ items: [] }));
         const perfP = get("/dashboard/performance", 12000).catch(() => null);
         const panelsP = Promise.allSettled([
           get("/dashboard/infrastructure", 15000),
@@ -1263,13 +1317,15 @@
         ]);
         const briefingP = get("/dashboard/briefing", 8000).catch(() => null);
 
-        const [registry, panelResults, briefingRaw, perfEarly] = await Promise.all([
+        const [registry, agentsHealth, audit, panelResults, briefingRaw, perfEarly] = await Promise.all([
           registryP,
+          agentsHealthP,
+          auditP,
           panelsP,
           briefingP,
           perfP,
         ]);
-        paintAgents(registry);
+        paintAgents(registry, agentsHealth, audit);
 
         const val = (r) => (r.status === "fulfilled" ? r.value : null);
         const [
@@ -1321,7 +1377,7 @@
       connectMissionWs();
       setInterval(() => {
         if (!document.hidden) refreshLiveTick();
-      }, 5000);
+      }, LIVE_POLL_MS);
       setInterval(() => {
         if (!document.hidden) load({ initial: false });
       }, 45000);

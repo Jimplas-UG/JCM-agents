@@ -13,6 +13,8 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.agents.base import BaseAgent
 from app.config import get_settings
 from app.models.tables import Alert, InfraHealthLog
+from app.services.agent_guard import is_allowed_outbound_url
+from app.services.agent_orchestrator import log_action, publish_agent_message, reserve_remediation_slot
 from app.services.alerting import AlertService
 
 
@@ -28,15 +30,42 @@ class InfrastructureResilienceAgent(BaseAgent):
 
         remediation = None
         if not health.get("healthy"):
-            remediation = await self._attempt_remediation(health)
-            if remediation:
-                log.remediation_action = remediation
-                await self.db.flush()
+            if reserve_remediation_slot():
+                remediation = await self._attempt_remediation(health)
+                if remediation:
+                    log.remediation_action = remediation
+                    await self.db.flush()
+                    await publish_agent_message(
+                        self.name,
+                        "remediation_completed",
+                        {"action": remediation, "services": health.get("services")},
+                        priority="high",
+                    )
+            else:
+                await log_action(
+                    self.name,
+                    "remediation_skipped_rate_limit",
+                    {"failed": list(health.get("services", {}).keys())},
+                    priority="high",
+                )
+
+        score = 1.0
+        for svc in self.SERVICE_ENDPOINTS:
+            if not health.get("services", {}).get(svc, {}).get("ok"):
+                score -= 0.2
+        vps = health.get("vps") or {}
+        if float(vps.get("cpu_pct") or 0) > 85:
+            score -= 0.1
+        if float(vps.get("ram_pct") or 0) > 85:
+            score -= 0.1
+        infra_score = round(max(0, score), 2)
 
         return {
             "status": "healthy" if health.get("healthy") else "degraded",
             "health": health,
             "remediation": remediation,
+            "infra_health_score": infra_score,
+            "system_running": True,
         }
 
     async def check_all_systems(self) -> dict[str, Any]:
@@ -169,9 +198,13 @@ class InfrastructureResilienceAgent(BaseAgent):
         action_taken = []
         async with httpx.AsyncClient(timeout=15.0) as client:
             for svc in failed_services:
+                url = f"{settings.watchdog_api_url}/remediate/{svc}"
+                if not is_allowed_outbound_url(url):
+                    self.logger.warning("remediation_url_blocked", service=svc, url=url)
+                    continue
                 try:
                     resp = await client.post(
-                        f"{settings.watchdog_api_url}/remediate/{svc}",
+                        url,
                         headers={"Authorization": f"Bearer {settings.watchdog_api_key}"},
                     )
                     if resp.status_code == 200:
@@ -180,14 +213,16 @@ class InfrastructureResilienceAgent(BaseAgent):
                     self.logger.warning("remediation_failed", service=svc, error=str(exc))
 
             if "mt5" in failed_services:
-                try:
-                    await client.post(
-                        f"{settings.mt5_api_url}/reconnect",
-                        headers={"Authorization": f"Bearer {settings.mt5_api_key}"},
-                    )
-                    action_taken.append("mt5_reconnect")
-                except Exception:
-                    pass
+                mt5_url = f"{settings.mt5_api_url}/reconnect"
+                if is_allowed_outbound_url(mt5_url):
+                    try:
+                        await client.post(
+                            mt5_url,
+                            headers={"Authorization": f"Bearer {settings.mt5_api_key}"},
+                        )
+                        action_taken.append("mt5_reconnect")
+                    except Exception:
+                        pass
 
         return ",".join(action_taken) if action_taken else None
 

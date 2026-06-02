@@ -1,11 +1,11 @@
 """Event ingestion pipeline — routes BSv3.2 events to supervisory agents."""
 
+import asyncio
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents import (
-    CeoCopilotAgent,
     ExecutionQualityAgent,
     ExplainabilityAgent,
     QuantMemoryAgent,
@@ -36,8 +36,11 @@ class EventPipeline:
             data = TradeEventIngest(**payload)
             trade, created = await self.memory.record_trade_event(data)
             if created:
-                await self.explain.explain_trade_approved(payload)
-                await self.execution.record_from_trade(trade)
+                await asyncio.gather(
+                    self.explain.explain_trade_approved(payload),
+                    self.execution.record_from_trade(trade),
+                )
+                _mark_ingest("quant_memory", "explainability")
             return {
                 "status": "recorded" if created else "duplicate",
                 "event_id": data.event_id,
@@ -47,8 +50,11 @@ class EventPipeline:
             data = TradeEventIngest(**payload)
             trade, created = await self.memory.record_trade_event(data)
             if created:
-                await self.explain.explain_trade_closed(payload, trade.event_id)
-                await self.execution.record_from_trade(trade)
+                await asyncio.gather(
+                    self.explain.explain_trade_closed(payload, trade.event_id),
+                    self.execution.record_from_trade(trade),
+                )
+                _mark_ingest("quant_memory", "explainability")
             return {
                 "status": "closed" if created else "duplicate",
                 "event_id": data.event_id,
@@ -60,6 +66,7 @@ class EventPipeline:
             _block, created = await self.memory.record_filter_block(data)
             if created:
                 await self.explain.explain_trade_blocked(payload)
+                _mark_ingest("quant_memory", "explainability")
             return {
                 "status": "blocked_recorded" if created else "duplicate",
                 "event_id": data.event_id,
@@ -68,6 +75,7 @@ class EventPipeline:
         if event_type == "system_state":
             data = SystemStateIngest(**payload)
             await self.memory.record_system_state(data)
+            _mark_ingest("quant_memory")
             return {"status": "state_recorded"}
 
         if event_type == "kill_switch":
@@ -84,3 +92,13 @@ class EventPipeline:
 
         await self.memory.on_event(event_type, payload)
         return {"status": "forwarded", "event_type": event_type}
+
+
+def _mark_ingest(*agents: str) -> None:
+    try:
+        from app.workers.agent_scheduler import mark_ingest_activity
+
+        for name in agents:
+            mark_ingest_activity(name)
+    except Exception:
+        pass

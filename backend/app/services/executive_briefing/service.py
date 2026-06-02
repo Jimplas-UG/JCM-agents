@@ -47,7 +47,7 @@ async def build_executive_briefing(
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     doc["rendered_markdown"] = render_executive_briefing(doc)
-    return doc
+    return doc, ctx
 
 
 def briefing_to_legacy_payload(doc: ExecutiveBriefingDocument, ctx: Any = None) -> dict[str, Any]:
@@ -93,7 +93,21 @@ def briefing_to_legacy_payload(doc: ExecutiveBriefingDocument, ctx: Any = None) 
             "lot_scaling_factor": float(risk.lot_scaling_factor or 1) if risk else 1,
         },
         "infrastructure": {
-            "health_score": 1.0 if (c and c.infra_live and c.infra_live.get("healthy")) else 0.5,
+            "health_score": (
+                1.0
+                if c
+                and (
+                    (c.infra_live and c.infra_live.get("healthy"))
+                    or (
+                        not c.infra_live
+                        and c.infra
+                        and c.infra.mt5_connected
+                        and c.infra.desk_api_ok
+                        and c.infra.forward_bot_ok
+                    )
+                )
+                else 0.5
+            ),
             "mt5_connected": infra.mt5_connected if infra else False,
             "desk_api_ok": infra.desk_api_ok if infra else False,
             "forward_bot_ok": infra.forward_bot_ok if infra else False,

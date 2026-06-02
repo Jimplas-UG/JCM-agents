@@ -198,6 +198,17 @@ class ResearchEvolutionAgent(BaseAgent):
         return []
 
     async def _queue_for_review(self, finding: dict[str, Any]) -> ResearchReviewQueue:
+        existing = await self.db.execute(
+            select(ResearchReviewQueue).where(
+                ResearchReviewQueue.title == finding["title"],
+                ResearchReviewQueue.finding_type == finding["finding_type"],
+                ResearchReviewQueue.status == ReviewStatus.pending,
+            ).limit(1)
+        )
+        dup = existing.scalar_one_or_none()
+        if dup:
+            return dup
+
         entry = ResearchReviewQueue(
             title=finding["title"],
             finding_type=finding["finding_type"],
