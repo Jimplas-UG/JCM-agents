@@ -134,7 +134,7 @@ async def _notify_executive_briefing_ready(briefing: dict) -> None:
         )
 
 
-def main() -> None:
+async def _run_scheduler() -> None:
     scheduler = AsyncIOScheduler()
 
     for name, (agent_cls, interval_seconds) in _agent_schedule().items():
@@ -165,11 +165,17 @@ def main() -> None:
         agents=list(_agent_schedule().keys()),
         executive_briefing=f"{settings.executive_briefing_hour:02d}:{settings.executive_briefing_minute:02d} {settings.executive_briefing_timezone}",
     )
-
     try:
-        asyncio.get_event_loop().run_forever()
+        await asyncio.Event().wait()
+    finally:
+        scheduler.shutdown(wait=False)
+
+
+def main() -> None:
+    try:
+        asyncio.run(_run_scheduler())
     except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
+        pass
 
 
 if __name__ == "__main__":

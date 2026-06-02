@@ -13,7 +13,7 @@ from app.db.redis_client import CHANNEL_DASHBOARD, publish
 from app.models.tables import Alert, AlertSeverity, CeoBriefing
 from app.services.executive_briefing.context import load_briefing_context
 from app.services.executive_briefing.service import build_executive_briefing, briefing_to_legacy_payload
-from app.services.live_dashboard import build_live_overview
+from app.services.live_dashboard import _infra_health_score, build_live_overview
 
 
 class CeoCopilotAgent(BaseAgent):
@@ -94,7 +94,7 @@ class CeoCopilotAgent(BaseAgent):
         row.system_status = state.bsv32_status if state else "unknown"
         row.live_pnl = Decimal(str(briefing["pnl"]["live_pnl"]))
         row.risk_score = Decimal(str(briefing["risk"]["risk_score"]))
-        row.infra_health_score = Decimal(str(self._infra_health_score(infra)))
+        row.infra_health_score = Decimal(str(_infra_health_score(infra)))
         row.active_alerts_count = len(alerts)
         row.pending_reviews = len(reviews)
         await self.db.flush()

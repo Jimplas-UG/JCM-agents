@@ -7,7 +7,8 @@ try {
 } catch { Write-Host "API FAIL: $_" -ForegroundColor Red }
 
 $sched = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object {
-    $_.CommandLine -match "agent_scheduler|jcm-scheduler-keepalive"
+    ($_.Name -eq "python.exe" -and $_.CommandLine -match "app\.workers\.agent_scheduler") -or
+    $_.CommandLine -match "jcm-scheduler-watchdog"
 }
 Write-Host "Agent scheduler: $(if ($sched) { 'RUNNING PID ' + $sched.ProcessId } else { 'NOT RUNNING' })"
 

@@ -29,7 +29,7 @@ $runner = "C:\Users\Administrator\jcm-scheduler-keepalive.ps1"
 Set-Location '$Backend'
 `$env:PYTHONUNBUFFERED='1'
 while (`$true) {
-    & '$py' -m app.workers.agent_scheduler 2>&1 | Tee-Object -FilePath '$Log' -Append
+    & '$py' -m app.workers.agent_scheduler >> '$Log' 2>&1
     Start-Sleep -Seconds 10
 }
 "@ | Set-Content -Path $runner -Encoding UTF8
@@ -42,10 +42,13 @@ Start-Sleep -Seconds 6
 $proc = Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object {
     $_.CommandLine -match "agent_scheduler|jcm-scheduler-keepalive"
 }
+$tn = "JCM-Agent-Scheduler"
+schtasks /Create /TN $tn /TR "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$runner`"" /SC ONSTART /RU Administrator /RL HIGHEST /F 2>$null | Out-Null
+
 if ($proc) {
-    Write-Host "OK agent_scheduler started PID $($proc.ProcessId)" -ForegroundColor Green
+    Write-Host "OK agent_scheduler PID $($proc.ProcessId) · daily briefing 09:00 Africa/Kampala"
 } else {
-    Write-Host "WARN: scheduler not detected - check $Log" -ForegroundColor Yellow
+    Write-Host "WARN: scheduler not detected - check $Log"
     if (Test-Path $Log) { Get-Content $Log -Tail 20 }
     exit 1
 }
