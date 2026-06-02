@@ -146,6 +146,9 @@ class DashboardOverview(BaseModel):
     pending_reviews: int
     pending_marketing_drafts: int = 0
     mt5_connected: bool
+    account_equity: float | None = None
+    data_source: str = "database"
+    positions: list[dict[str, Any]] = Field(default_factory=list)
     last_updated: datetime
 
 

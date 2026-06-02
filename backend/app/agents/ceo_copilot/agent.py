@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.base import BaseAgent
 from app.db.redis_client import CHANNEL_DASHBOARD, publish
-from app.models.tables import Alert, AlertSeverity, CeoBriefing, InfraHealthLog
+from app.models.tables import Alert, AlertSeverity, CeoBriefing
 from app.services.executive_briefing.context import load_briefing_context
 from app.services.executive_briefing.service import build_executive_briefing, briefing_to_legacy_payload
+from app.services.live_dashboard import build_live_overview
 
 
 class CeoCopilotAgent(BaseAgent):
@@ -68,54 +69,11 @@ class CeoCopilotAgent(BaseAgent):
         await self._persist_briefing(today, briefing, ctx)
         return briefing
 
-    async def get_dashboard_overview(self) -> dict[str, Any]:
-        """Read-only overview — no briefing persistence on dashboard poll."""
-        ctx = await load_briefing_context(self.db)
-        state = ctx.state
-        risk = ctx.risk
-        infra = ctx.infra
-
-        market_regime = "unknown"
-        if state and state.market_regime is not None:
-            market_regime = (
-                state.market_regime.value
-                if hasattr(state.market_regime, "value")
-                else str(state.market_regime)
-            )
-
-        return {
-            "bsv32_status": state.bsv32_status if state else "unknown",
-            "system_running": state.bsv32_status == "running" if state else False,
-            "nfp_blackout": state.nfp_blackout if state else False,
-            "live_pnl": float(state.floating_pnl or 0) if state else 0,
-            "floating_pnl": float(state.floating_pnl or 0) if state else 0,
-            "daily_pnl": float(state.daily_pnl or 0) if state else 0,
-            "open_positions": state.open_positions if state else 0,
-            "risk_score": float(risk.risk_score or 0) if risk else 0,
-            "market_regime": market_regime,
-            "infra_health_score": self._infra_health_score(infra),
-            "active_alerts": len(ctx.alerts_open),
-            "pending_reviews": len(ctx.research_pending),
-            "pending_marketing_drafts": len(ctx.marketing_drafts),
-            "mt5_connected": infra.mt5_connected if infra else False,
-            "last_updated": datetime.now(timezone.utc),
-        }
-
-    def _infra_health_score(self, infra: InfraHealthLog | None) -> float:
-        if not infra:
-            return 0.0
-        score = 1.0
-        if not infra.mt5_connected:
-            score -= 0.3
-        if not infra.desk_api_ok:
-            score -= 0.2
-        if not infra.forward_bot_ok:
-            score -= 0.2
-        if float(infra.vps_cpu_pct or 0) > 85:
-            score -= 0.15
-        if float(infra.vps_ram_pct or 0) > 85:
-            score -= 0.15
-        return round(max(0, score), 2)
+    async def get_dashboard_overview(self, *, live: bool = True) -> dict[str, Any]:
+        """Read-only overview — MT5 live P&L/positions when bridge is connected."""
+        if live:
+            return await build_live_overview(self.db, use_mt5=True)
+        return await build_live_overview(self.db, use_mt5=False)
 
     async def _persist_briefing(self, today: date, briefing: dict, ctx: Any) -> None:
         state = ctx.state

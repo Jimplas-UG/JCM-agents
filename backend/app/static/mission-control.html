@@ -649,21 +649,139 @@
       return `<div class="block"><p class="loading-pulse">${esc(label)}</p></div>`;
     }
 
-    function paintOverview(ov) {
+    let latestOverview = null;
+    let liveTickInFlight = false;
+    let missionWs = null;
+
+    function overviewMetricCards(ov) {
+      const src = ov.data_source === "mt5_live" ? "MT5 live" : "DB snapshot";
+      return [
+        ["live_pnl", "Live P&L", "$" + fmt(ov.live_pnl), ov.live_pnl >= 0 ? "var(--green)" : "var(--red)"],
+        ["daily_pnl", "Daily P&L", "$" + fmt(ov.daily_pnl), (ov.daily_pnl || 0) >= 0 ? "var(--green)" : "var(--red)"],
+        ["open_positions", "Open Positions", String(ov.open_positions ?? 0)],
+        ["account_equity", "Account Equity", ov.account_equity != null ? "$" + fmt(ov.account_equity) : "—"],
+        ["risk_score", "Risk Score", fmt(ov.risk_score, 1)],
+        ["infra_health", "Infra Health", fmt((ov.infra_health_score || 0) * 100, 0) + "%"],
+        ["active_alerts", "Active Alerts", String(ov.active_alerts ?? 0)],
+        ["pending_reviews", "Pending Reviews", String(ov.pending_reviews ?? 0)],
+        ["mt5_bridge", "MT5 Bridge", ov.mt5_connected ? "Online" : "Offline", ov.mt5_connected ? "var(--green)" : "var(--red)"],
+        ["data_source", "Data Source", src, "var(--gold-light)"],
+      ];
+    }
+
+    function metricCardsHtml(items) {
+      return `<div class="grid">${items.map(([key, label, val, color, extraClass]) => {
+        const cardCls = ["card", extraClass || ""].filter(Boolean).join(" ");
+        const valCls = key === "regime" ? "val val-regime" : "val";
+        return `<div class="${cardCls}" data-metric="${key}"><h3>${esc(label)}</h3><div class="${valCls}" style="color:${color || "var(--gold-light)"}">${val}</div></div>`;
+      }).join("")}</div>`;
+    }
+
+    function openPositionsBlock(ov) {
+      const pos = ov.positions || [];
+      if (!pos.length) {
+        return `<div class="block" id="live-positions-block"><h3>Open Positions (MT5)</h3><p class="muted">No open positions</p></div>`;
+      }
+      const rows = pos.map((p) => `<tr>
+        <td>${esc(p.symbol)}</td>
+        <td>${esc(p.type)}</td>
+        <td>${fmt(p.volume, 2)}</td>
+        <td>${fmt(p.price_open)}</td>
+        <td style="color:${(p.profit||0)>=0?"var(--green)":"var(--red)"}">$${fmt(p.profit)}</td>
+      </tr>`).join("");
+      return `<div class="block" id="live-positions-block"><h3>Open Positions (MT5 live)</h3>
+        <table class="data-table"><thead><tr><th>Symbol</th><th>Side</th><th>Lots</th><th>Entry</th><th>P&L</th></tr></thead>
+        <tbody id="live-positions-body">${rows}</tbody></table></div>`;
+    }
+
+    function updateOverviewLiveValues(ov) {
+      const colorMap = {
+        live_pnl: (ov.live_pnl || 0) >= 0 ? "var(--green)" : "var(--red)",
+        daily_pnl: (ov.daily_pnl || 0) >= 0 ? "var(--green)" : "var(--red)",
+        mt5_bridge: ov.mt5_connected ? "var(--green)" : "var(--red)",
+      };
+      const values = {
+        live_pnl: "$" + fmt(ov.live_pnl),
+        daily_pnl: "$" + fmt(ov.daily_pnl),
+        open_positions: String(ov.open_positions ?? 0),
+        account_equity: ov.account_equity != null ? "$" + fmt(ov.account_equity) : "—",
+        risk_score: fmt(ov.risk_score, 1),
+        infra_health: fmt((ov.infra_health_score || 0) * 100, 0) + "%",
+        active_alerts: String(ov.active_alerts ?? 0),
+        pending_reviews: String(ov.pending_reviews ?? 0),
+        mt5_bridge: ov.mt5_connected ? "Online" : "Offline",
+        data_source: ov.data_source === "mt5_live" ? "MT5 live" : "DB snapshot",
+      };
+      Object.entries(values).forEach(([key, text]) => {
+        const el = document.querySelector(`[data-metric="${key}"] .val`);
+        if (el) {
+          el.textContent = text;
+          if (colorMap[key]) el.style.color = colorMap[key];
+        }
+      });
+      const tbody = $("live-positions-body");
+      if (tbody && (ov.positions || []).length) {
+        tbody.innerHTML = (ov.positions || []).map((p) => `<tr>
+          <td>${esc(p.symbol)}</td><td>${esc(p.type)}</td><td>${fmt(p.volume, 2)}</td>
+          <td>${fmt(p.price_open)}</td>
+          <td style="color:${(p.profit||0)>=0?"var(--green)":"var(--red)"}">$${fmt(p.profit)}</td>
+        </tr>`).join("");
+      }
+    }
+
+    function paintOverviewHeader(ov) {
       $("bsv32-badge").textContent = `BSv3.2 ${ov.bsv32_status || "unknown"}`;
       $("bsv32-badge").className = "badge " + (ov.system_running ? "badge-ok" : "badge-warn");
       $("regime-badge").textContent = `${formatRegimeLabel(ov.market_regime)} regime`;
       $("regime-badge").className = "badge badge-gold";
-      $("overview").innerHTML = hero("Mission Control Snapshot", "Real-time supervisory intelligence across the BSv3.2 stack") + cards([
-        ["Live P&L", "$" + fmt(ov.live_pnl), ov.live_pnl >= 0 ? "var(--green)" : "var(--red)"],
-        ["Daily P&L", "$" + fmt(ov.daily_pnl)],
-        ["Open Positions", ov.open_positions ?? 0],
-        ["Risk Score", fmt(ov.risk_score, 1)],
-        ["Infra Health", fmt(ov.infra_health_score, 0) + "%"],
-        ["Active Alerts", ov.active_alerts ?? 0],
-        ["Pending Reviews", ov.pending_reviews ?? 0],
-        ["MT5 Bridge", ov.mt5_connected ? "Online" : "Offline", ov.mt5_connected ? "var(--green)" : "var(--red)"],
-      ]);
+    }
+
+    function paintOverview(ov, opts = {}) {
+      const initial = opts.initial !== false;
+      latestOverview = ov;
+      paintOverviewHeader(ov);
+      if (initial || !$("overview").dataset.liveReady) {
+        const sub = ov.data_source === "mt5_live"
+          ? "MT5-connected live P&L · refreshes every 5s"
+          : "Supervisory intelligence across the BSv3.2 stack";
+        $("overview").innerHTML = hero("Mission Control Snapshot", sub)
+          + metricCardsHtml(overviewMetricCards(ov))
+          + openPositionsBlock(ov);
+        $("overview").dataset.liveReady = "1";
+      } else {
+        updateOverviewLiveValues(ov);
+      }
+    }
+
+    async function refreshLiveTick() {
+      if (liveTickInFlight || document.hidden || !getMcAuth()) return;
+      liveTickInFlight = true;
+      try {
+        const ov = await get("/dashboard/live-tick", 8000);
+        paintOverview(ov, { initial: false });
+        const ts = ov.last_updated ? new Date(ov.last_updated).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const liveTag = ov.data_source === "mt5_live" ? "MT5 live" : "cached";
+        $("status").textContent = `${liveTag} · ${ts}`;
+      } catch (e) {
+        if (e.message !== "login_required") {
+          $("status").textContent = "Live tick paused";
+        }
+      } finally {
+        liveTickInFlight = false;
+      }
+    }
+
+    function connectMissionWs() {
+      if (missionWs && (missionWs.readyState === WebSocket.OPEN || missionWs.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      missionWs = new WebSocket(`${proto}//${location.host}/ws`);
+      missionWs.onmessage = () => { refreshLiveTick(); };
+      missionWs.onclose = () => {
+        missionWs = null;
+        setTimeout(connectMissionWs, 5000);
+      };
     }
 
     function paintAgents(registry) {
@@ -1124,8 +1242,8 @@
           $("status").textContent = "Refreshing…";
         }
 
-        const ov = await get("/dashboard/overview", 12000);
-        paintOverview(ov);
+        const ov = await get("/dashboard/overview?live=true", 12000);
+        paintOverview(ov, { initial: true });
         paintRegimePanel(ov);
 
         const registryP = get("/agents/registry", 12000);
@@ -1200,13 +1318,20 @@
       hideLoginGate();
       show("overview", "Command Overview");
       await load({ initial: true });
+      connectMissionWs();
+      setInterval(() => {
+        if (!document.hidden) refreshLiveTick();
+      }, 5000);
       setInterval(() => {
         if (!document.hidden) load({ initial: false });
-      }, 60000);
+      }, 45000);
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && missionDataReady && getMcAuth()) load({ initial: false });
+      if (!document.hidden && missionDataReady && getMcAuth()) {
+        refreshLiveTick();
+        load({ initial: false });
+      }
     });
 
     $("login-btn").onclick = async () => {

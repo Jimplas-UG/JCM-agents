@@ -33,9 +33,19 @@ router = APIRouter(
 
 
 @router.get("/overview", response_model=DashboardOverview)
-async def get_overview(db: AsyncSession = Depends(get_db_session)) -> dict:
+async def get_overview(
+    live: bool = Query(True, description="Overlay MT5 live P&L and open positions"),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
     agent = CeoCopilotAgent(db)
-    return await agent.get_dashboard_overview()
+    return await agent.get_dashboard_overview(live=live)
+
+
+@router.get("/live-tick", response_model=DashboardOverview)
+async def get_live_tick(db: AsyncSession = Depends(get_db_session)) -> dict:
+    """Lightweight poll endpoint for Mission Control (MT5-connected metrics)."""
+    agent = CeoCopilotAgent(db)
+    return await agent.get_dashboard_overview(live=True)
 
 
 @router.get("/trades", response_model=list[TradeEventResponse])

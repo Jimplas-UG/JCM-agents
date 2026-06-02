@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     executive_briefing_run_agents_before: bool = True
     executive_briefing_telegram_notify: bool = True
     mission_control_public_url: str = "http://104.194.140.203:8000"
+    mission_control_live_poll_seconds: int = 5
     marketing_auto_approve: bool = False
 
     cloudzy_subscription_expires: str = ""
