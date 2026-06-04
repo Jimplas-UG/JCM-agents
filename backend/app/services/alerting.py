@@ -13,7 +13,11 @@ from app.models.tables import Alert
 logger = get_logger("alerting")
 
 
-async def send_telegram_message(text: str, *, parse_mode: str = "Markdown") -> bool:
+async def send_telegram_message(
+    text: str,
+    *,
+    parse_mode: str | None = "Markdown",
+) -> bool:
     """Send a plain Telegram message when bot token and chat id are configured."""
     settings = get_settings()
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
@@ -27,10 +31,18 @@ async def send_telegram_message(text: str, *, parse_mode: str = "Markdown") -> b
     if parse_mode:
         payload["parse_mode"] = parse_mode
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             res = await client.post(url, json=payload)
+            if res.status_code == 400 and parse_mode:
+                # Markdown special chars in briefing headlines often break parse_mode.
+                plain = {k: v for k, v in payload.items() if k != "parse_mode"}
+                res = await client.post(url, json=plain)
             res.raise_for_status()
         return True
+    except httpx.HTTPStatusError as exc:
+        body = (exc.response.text or "")[:300]
+        logger.warning("telegram_send_failed", error=str(exc), response=body)
+        return False
     except Exception as exc:
         logger.warning("telegram_send_failed", error=str(exc))
         return False

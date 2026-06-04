@@ -1,33 +1,32 @@
-# Send live CEO briefing recap to Telegram (run on VPS).
+# Executive briefing + Telegram — uses canonical Python job (same as 09:00 scheduler).
 $ErrorActionPreference = "Stop"
+$LogDir = "C:\logs\jcm"
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$LogFile = Join-Path $LogDir "daily-briefing-telegram.log"
+
+function Write-Log($msg) {
+    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $msg"
+    Add-Content -Path $LogFile -Value $line
+    Write-Host $line
+}
+
 $Root = "C:\jcm-project"
+if (-not (Test-Path "$Root\backend\.venv\Scripts\python.exe")) {
+    $alt = "C:\Users\Administrator\Documents\JCM agents\JCM-agents"
+    if (Test-Path "$alt\backend\.venv\Scripts\python.exe") { $Root = $alt }
+}
 $Backend = Join-Path $Root "backend"
 $Py = Join-Path $Backend ".venv\Scripts\python.exe"
-Copy-Item (Join-Path $Root ".env") (Join-Path $Backend ".env") -Force -EA SilentlyContinue
+$EnvFile = Join-Path $Root ".env"
+
+if (-not (Test-Path $Py)) { Write-Log "ERROR: venv not found"; exit 1 }
+if (-not (Test-Path $EnvFile)) { Write-Log "ERROR: .env missing"; exit 1 }
+
+Copy-Item $EnvFile (Join-Path $Backend ".env") -Force
 Set-Location $Backend
-& $Py -c @"
-import asyncio
-from app.db.session import AsyncSessionLocal
-from app.agents.ceo_copilot.agent import CeoCopilotAgent
-from app.services.executive_briefing.telegram import format_executive_briefing_telegram
-from app.services.alerting import send_telegram_message
-from app.config import get_settings
-
-async def main():
-    settings = get_settings()
-    async with AsyncSessionLocal() as db:
-        agent = CeoCopilotAgent(db)
-        briefing = await agent.generate_daily_briefing()
-        await db.commit()
-    base = (settings.mission_control_public_url or '').rstrip('/')
-    url = f'{base}/mission-control' if base else ''
-    text = format_executive_briefing_telegram(
-        briefing,
-        ceo_name=settings.executive_briefing_ceo_name,
-        mission_control_url=url,
-    )
-    ok = await send_telegram_message(text)
-    print('sent' if ok else 'failed')
-
-asyncio.run(main())
-"@
+Write-Log "daily_briefing_job --force"
+& $Py -m app.workers.daily_briefing_job --force
+$code = $LASTEXITCODE
+if ($code -eq 0) { Write-Log "SUCCESS: briefing pipeline completed" }
+else { Write-Log "ERROR: briefing pipeline exit $code" }
+exit $code

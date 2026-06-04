@@ -17,8 +17,7 @@ from app.logging_config import get_logger, setup_logging
 from app.metrics.prometheus import AGENT_CYCLE_DURATION
 from app.services.agent_orchestrator import record_agent_cycle
 from app.services.agent_registry import INGEST_DRIVEN_AGENTS, agent_schedule
-from app.services.alerting import send_telegram_message
-from app.services.executive_briefing.telegram import format_executive_briefing_telegram
+from app.workers.daily_briefing_delivery import deliver_executive_briefing
 
 setup_logging()
 logger = get_logger("agent_scheduler")
@@ -61,68 +60,17 @@ async def run_agent_cycle(name: str, agent_cls: type) -> None:
 
 
 async def run_daily_executive_briefing() -> None:
-    """09:00 Kampala — refresh agents then publish CEO executive briefing."""
+    """09:00 Kampala — shared delivery pipeline (same as Windows scheduled task)."""
     logger.info(
         "daily_executive_briefing_start",
         timezone=settings.executive_briefing_timezone,
         hour=settings.executive_briefing_hour,
     )
-
-    if settings.executive_briefing_run_agents_before:
-        from app.agents.ceo_copilot.agent import CeoCopilotAgent
-
-        order = [
-            "infra_resilience",
-            "quant_memory",
-            "portfolio_risk",
-            "execution_quality",
-            "performance_intel",
-            "explainability",
-            "research_evolution",
-            "marketing_agent",
-        ]
-        for agent_name in order:
-            await run_agent_cycle(agent_name, _AGENT_CLASSES[agent_name])
-
-    async with AsyncSessionLocal() as db:
-        try:
-            from app.agents.ceo_copilot.agent import CeoCopilotAgent
-
-            copilot = CeoCopilotAgent(db)
-            result = await copilot.generate_daily_briefing(force=True)
-            await db.commit()
-            logger.info(
-                "daily_executive_briefing_complete",
-                briefing_date=str(result.get("briefing_date")),
-                mission_status=result.get("mission_status"),
-            )
-            await _notify_executive_briefing_ready(result)
-        except Exception as exc:
-            await db.rollback()
-            logger.error("daily_executive_briefing_failed", error=str(exc))
-
-
-async def _notify_executive_briefing_ready(briefing: dict) -> None:
-    if not settings.executive_briefing_telegram_notify:
-        return
-    base = (settings.mission_control_public_url or "").rstrip("/")
-    mc_url = f"{base}/mission-control" if base else ""
-    text = format_executive_briefing_telegram(
-        briefing,
-        ceo_name=settings.executive_briefing_ceo_name,
-        mission_control_url=mc_url,
-    )
-    sent = await send_telegram_message(text)
-    if sent:
-        logger.info(
-            "executive_briefing_telegram_sent",
-            briefing_date=str(briefing.get("briefing_date")),
-        )
+    outcome = await deliver_executive_briefing(force=True)
+    if outcome.get("telegram_sent") or outcome.get("status") == "already_sent":
+        logger.info("daily_executive_briefing_complete", **outcome)
     else:
-        logger.warning(
-            "executive_briefing_telegram_not_sent",
-            hint="Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env",
-        )
+        logger.error("daily_executive_briefing_failed", **outcome)
 
 
 async def _run_scheduler() -> None:
