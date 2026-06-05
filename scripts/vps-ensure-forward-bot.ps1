@@ -1,4 +1,4 @@
-# Ensure forward bot + execution stack running — does NOT modify strategy code
+# Ensure forward bot + execution stack running - does NOT modify strategy code
 $ErrorActionPreference = "Continue"
 $LogDir = "C:\logs\tradingbot"
 $ef = "C:\ProgramData\Bilshenz\tradingbot.env"
@@ -37,11 +37,19 @@ if ((Test-Path $term) -and -not (Get-Process terminal64 -ErrorAction SilentlyCon
     Start-Sleep -Seconds 20
 }
 
-# 3. Bilshenz services via tasks (never kill python globally)
+# 3. Forward validation junction (scripts/ layout on VPS)
+$vj = "C:\opt\bilshenz\backend\scripts\validation"
+$vt = "C:\opt\bilshenz\backend\validation"
+if ((Test-Path $vt) -and -not (Test-Path $vj)) {
+    cmd /c mklink /J "$vj" "$vt" 2>$null
+    Log "Linked scripts/validation -> validation"
+}
+
+# 4. Bilshenz services via tasks (never kill python globally)
 function Ensure-Port([int]$port, [string]$task) {
     $up = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     if (-not $up) {
-        Log "Port $port down — running $task"
+        Log "Port $port down - running $task"
         schtasks /Run /TN $task 2>&1 | Out-Null
         Start-Sleep -Seconds 15
     } else {
@@ -49,10 +57,37 @@ function Ensure-Port([int]$port, [string]$task) {
     }
 }
 
-Ensure-Port 8765 "Bilshenz-MT5-API"
-Ensure-Port 8791 "Bilshenz-DeskAPI"
+function Run-TaskIfExists([string]$name) {
+    schtasks /Query /TN $name 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        schtasks /Run /TN $name 2>&1 | Out-Null
+        return $true
+    }
+    return $false
+}
 
-# 4. Forward bot — single worker only
+if (-not (Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)) {
+    Log "Port 8765 down - starting MT5 API task"
+    if (-not (Run-TaskIfExists "Bilshenz-MT5-API-Sys")) { Run-TaskIfExists "Bilshenz-MT5-API" | Out-Null }
+    Start-Sleep -Seconds 15
+} else {
+    Log "Port 8765 OK"
+}
+if (-not (Get-NetTCPConnection -LocalPort 8791 -State Listen -ErrorAction SilentlyContinue)) {
+    Log "Port 8791 down - starting Desk API task"
+    if (-not (Run-TaskIfExists "Bilshenz-DeskAPI-Sys")) { Run-TaskIfExists "Bilshenz-DeskAPI" | Out-Null }
+    Start-Sleep -Seconds 15
+} else {
+    Log "Port 8791 OK"
+}
+try {
+    Invoke-RestMethod "http://127.0.0.1:8765/api/reconnect" -Method POST -TimeoutSec 20 | Out-Null
+    Log "MT5 API reconnect OK"
+} catch {
+    Log "MT5 reconnect skipped: $($_.Exception.Message)"
+}
+
+# 5. Forward bot - single worker only
 $fwdProcs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     $_.Name -eq 'node.exe' -and $_.CommandLine -match "run-forward-demo-30d"
 })
@@ -64,31 +99,31 @@ if ($fwdProcs.Count -gt 1) {
     }
 }
 if ($fwdProcs.Count -eq 0) {
-    Log "Forward bot not running — starting Bilshenz-ForwardBot task"
-    schtasks /Run /TN "Bilshenz-ForwardBot" 2>&1 | Out-Null
+    Log "Forward bot not running - starting forward bot task"
+    if (-not (Run-TaskIfExists "Bilshenz-ForwardBot-Sys")) { Run-TaskIfExists "Bilshenz-ForwardBot" | Out-Null }
     Start-Sleep -Seconds 20
 } else {
     Log "Forward bot running PID $($fwdProcs[0].ProcessId)"
 }
 
-# 5. Bilshenz watchdog (production — polls MT5/desk/forward)
+# 6. Bilshenz watchdog (production - polls MT5/desk/forward)
 $wdTask = Get-ScheduledTask -TaskName "Bilshenz-Watchdog" -ErrorAction SilentlyContinue
 if ($wdTask -and $wdTask.State -ne "Running") {
     schtasks /Run /TN "Bilshenz-Watchdog" 2>&1 | Out-Null
     Log "Started Bilshenz-Watchdog"
 }
 
-# 6. JCM observability (sidecars only — not trading)
+# 7. JCM observability (sidecars only - not trading)
 & "C:\Users\Administrator\start-sidecars.ps1" 2>&1 | ForEach-Object { Log $_ }
 
-# 7. Clear failsafe if MT5 healthy
+# 8. Clear failsafe if MT5 healthy
 Start-Sleep -Seconds 5
 try {
     $m = Invoke-RestMethod "http://127.0.0.1:8765/api/status" -TimeoutSec 10
     $safety = "C:\logs\tradingbot\safety-state.json"
     $execReady = $m.connected -and $m.terminal_trade_allowed -and $m.account.trade_allowed
     if (-not $m.terminal_trade_allowed) {
-        Log "WARN: MT5 AutoTrading OFF — restarting terminal with /algotrading"
+        Log "WARN: MT5 AutoTrading OFF - restarting terminal with /algotrading"
         taskkill /f /im terminal64.exe 2>$null
         Start-Sleep -Seconds 8
         Start-Process $term -ArgumentList "/algotrading"
@@ -101,18 +136,18 @@ try {
             $state.failsafe = $false
             $state.failsafeReason = $null
             $state | ConvertTo-Json | Set-Content $safety -Encoding UTF8
-            Log "Cleared failsafe — MT5 connected"
+            Log "Cleared failsafe - MT5 connected"
         }
     }
 } catch { Log "MT5 check skipped: $($_.Exception.Message)" }
 
-# 8. JCM 9-agent scheduler (Mission Control data freshness)
+# 9. JCM 9-agent scheduler (Mission Control data freshness)
 $agentStarter = "C:\jcm-project\scripts\vps-start-agent-scheduler.ps1"
 if (Test-Path $agentStarter) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $agentStarter 2>&1 | ForEach-Object { Log $_ }
 }
 
-# 9. Health summary
+# 10. Health summary
 Log "--- SUMMARY ---"
 try {
     $tick = Invoke-RestMethod "http://127.0.0.1:8765/api/tick/XAUUSD" -TimeoutSec 8

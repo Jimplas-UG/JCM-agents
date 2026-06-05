@@ -226,6 +226,16 @@ def api_logs(limit: int = 50):
     return {"deals": _ipc_call(lambda: connector.trade_logs(limit), [])}
 
 
+@app.post("/api/reconnect")
+def api_reconnect():
+    """Re-attach MT5 IPC after terminal restart (no strategy impact)."""
+    ok = _ipc_call(connector.try_attach_existing, False)
+    if not ok and connector._logged_in:
+        ok = _ipc_call(connector.reconnect, False)
+    snap = _ipc_call(connector.status_snapshot, {"connected": False})
+    return {"ok": bool(ok), "status": snap}
+
+
 if __name__ == "__main__":
     import uvicorn
 

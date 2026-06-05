@@ -14,6 +14,7 @@ const BACKEND_ROOT = path.join(__dirname, '..');
 const STATE_FILE = path.join(BACKEND_ROOT, 'validation', 'data', 'jcm-position-watch.json');
 
 const MT5_API = (process.env.MT5_API_URL ?? 'http://127.0.0.1:8765').replace(/\/$/, '');
+const BSv32_MAGIC = Number(process.env.BSV32_MT5_MAGIC ?? '77002002');
 
 type TrackedPosition = {
   ticket: number;
@@ -61,6 +62,7 @@ type Mt5Position = {
   price_open?: number;
   price_current?: number;
   profit?: number;
+  magic?: number;
 };
 
 async function fetchMt5Positions(): Promise<Mt5Position[]> {
@@ -76,6 +78,40 @@ function normalizeDirection(p: Mt5Position): 'long' | 'short' {
   return 'short';
 }
 
+/** Seed watcher from current MT5 opens (avoids false trade_closed on first poll). */
+export async function seedJcmPositionWatch(): Promise<void> {
+  if (!jcmWebhookConfigured()) return;
+  const state = loadState();
+  if (Object.keys(state.positions).length > 0) return;
+  try {
+    const rows = await fetchMt5Positions();
+    const current: Record<string, TrackedPosition> = {};
+    for (const p of rows) {
+      if (p.magic != null && Number(p.magic) !== BSv32_MAGIC) continue;
+      const ticket = Number(p.ticket);
+      if (!Number.isFinite(ticket)) continue;
+      const key = String(ticket);
+      current[key] = {
+        ticket,
+        symbol: String(p.symbol ?? 'XAUUSD'),
+        direction: normalizeDirection(p),
+        lotSize: Number(p.volume ?? 0.01),
+        entryPrice: Number(p.price_open ?? 0),
+        lastProfit: Number(p.profit ?? 0),
+        lastPrice: Number(p.price_current ?? p.price_open ?? 0),
+        seenAtMs: Date.now(),
+      };
+    }
+    if (Object.keys(current).length > 0) {
+      saveState({ positions: current });
+      console.error(`[jcm] position watch seeded ${Object.keys(current).length} open ticket(s)`);
+    }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[jcm] position seed failed: ${msg}`);
+  }
+}
+
 /** Poll MT5 open positions; emit trade_closed when a tracked ticket disappears. */
 export async function pollJcmPositionCloses(): Promise<number> {
   if (!jcmWebhookConfigured()) return 0;
@@ -88,6 +124,7 @@ export async function pollJcmPositionCloses(): Promise<number> {
   try {
     const rows = await fetchMt5Positions();
     for (const p of rows) {
+      if (p.magic != null && Number(p.magic) !== BSv32_MAGIC) continue;
       const ticket = Number(p.ticket);
       if (!Number.isFinite(ticket)) continue;
       const key = String(ticket);

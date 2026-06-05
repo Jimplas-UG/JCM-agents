@@ -361,6 +361,8 @@ class MT5Connector:
         side_u: str,
         sl: float | None,
         tp: float | None,
+        *,
+        widen_factor: float = 1.0,
     ) -> tuple[float | None, float | None, dict[str, Any]]:
         """Clamp SL/TP to broker stops_level so order_send does not return 10016."""
         meta: dict[str, Any] = {}
@@ -372,7 +374,7 @@ class MT5Connector:
         digits = int(info.digits)
         stops_level = int(getattr(info, "trade_stops_level", 0) or 0)
         freeze_level = int(getattr(info, "freeze_level", 0) or 0)
-        min_dist = max(stops_level, freeze_level, 10) * point + point * 2
+        min_dist = (max(stops_level, freeze_level, 10) * point + point * 2) * max(1.0, widen_factor)
 
         def rnd(x: float) -> float:
             return round(x, digits)
@@ -450,38 +452,66 @@ class MT5Connector:
 
         sl, tp, stop_meta = self._normalize_stops(sym, side_u, sl, tp)
 
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": sym,
-            "volume": float(volume),
-            "type": order_type,
-            "price": intended_price,
-            "magic": int(magic),
-            "comment": comment,
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        if sl is not None:
-            request["sl"] = float(sl)
-        if tp is not None:
-            request["tp"] = float(tp)
+        def _send(sl_v: float | None, tp_v: float | None, meta: dict[str, Any]) -> Any:
+            req = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": sym,
+                "volume": float(volume),
+                "type": order_type,
+                "price": intended_price,
+                "magic": int(magic),
+                "comment": comment,
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            if sl_v is not None:
+                req["sl"] = float(sl_v)
+            if tp_v is not None:
+                req["tp"] = float(tp_v)
+            return mt5.order_send(req), meta
+
         t0 = _time.perf_counter()
-        r = mt5.order_send(request)
+        r, stop_meta = _send(sl, tp, stop_meta)
         latency_ms = round((_time.perf_counter() - t0) * 1000, 1)
         if r is None:
             return {"ok": False, "error": str(mt5.last_error()), "latency_ms": latency_ms}
+
+        invalid_stops = 10016
+        if r.retcode == invalid_stops and (sl is not None or tp is not None):
+            sl_w, tp_w, retry_meta = self._normalize_stops(
+                sym, side_u, sl, tp, widen_factor=2.5
+            )
+            stop_meta = {**stop_meta, **retry_meta, "retry_widen": True}
+            r, stop_meta = _send(sl_w, tp_w, stop_meta)
+            latency_ms = round((_time.perf_counter() - t0) * 1000, 1)
+            if r is None:
+                return {"ok": False, "error": str(mt5.last_error()), "latency_ms": latency_ms}
+            if r.retcode == invalid_stops:
+                r, stop_meta = _send(None, None, {**stop_meta, "retry_no_stops": True})
+                latency_ms = round((_time.perf_counter() - t0) * 1000, 1)
+                if r is None:
+                    return {"ok": False, "error": str(mt5.last_error()), "latency_ms": latency_ms}
         fill_price = float(getattr(r, "price", intended_price) or intended_price)
         slip_pips = (
             (fill_price - intended_price) / pip
             if side_u == "BUY"
             else (intended_price - fill_price) / pip
         )
+        position_ticket: int | None = None
+        if r.retcode == mt5.TRADE_RETCODE_DONE:
+            pos_rows = mt5.positions_get(symbol=sym)
+            if pos_rows:
+                for p in pos_rows:
+                    if int(p.magic) == int(magic):
+                        position_ticket = int(p.ticket)
+                        break
         out: dict[str, Any] = {
             "ok": r.retcode == mt5.TRADE_RETCODE_DONE,
             "retcode": r.retcode,
             "comment": r.comment,
             "order": r.order,
             "deal": r.deal,
+            "position": position_ticket,
             "intended_price": intended_price,
             "fill_price": fill_price,
             "spread_pips": round(spread_pips, 2),
@@ -510,8 +540,10 @@ class MT5Connector:
                 {
                     "ticket": d.ticket,
                     "order": d.order,
+                    "position_id": int(getattr(d, "position_id", 0) or 0),
                     "symbol": d.symbol,
                     "type": d.type,
+                    "entry": int(getattr(d, "entry", 0) or 0),
                     "volume": d.volume,
                     "price": d.price,
                     "profit": d.profit,

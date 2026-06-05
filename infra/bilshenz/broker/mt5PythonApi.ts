@@ -13,6 +13,7 @@ export type Mt5OrderResult = {
   retcode?: number;
   orderId?: number;
   dealId?: number;
+  positionId?: number;
 };
 
 export type Mt5Bar = { t: number; o: number; h: number; l: number; c: number };
@@ -190,6 +191,7 @@ export async function postMt5OrderFromIntent(
       retcode: num('retcode'),
       orderId: num('order'),
       dealId: num('deal'),
+      positionId: num('position'),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

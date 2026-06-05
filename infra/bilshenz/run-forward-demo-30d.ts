@@ -40,7 +40,7 @@ import {
   type SafetyState,
 } from '../production/safetyControls';
 import { mergeFrozenDeskCfg, productionFrozenConfig, verifyFrozenStrategy } from '../strategy/frozenProduction';
-import { pollJcmPositionCloses } from '../jcm/jcmPositionWatcher';
+import { pollJcmPositionCloses, seedJcmPositionWatch } from '../jcm/jcmPositionWatcher';
 import {
   jcmWebhookConfigured,
   publishSystemState,
@@ -214,7 +214,7 @@ function lotsForRisk(equity: number, slPips: number, usdPerPip: number): number 
 }
 
 async function tickOnce(session: SessionState): Promise<void> {
-  void pollJcmPositionCloses();
+  await pollJcmPositionCloses();
 
   const now = Date.now();
   if (now >= session.endMs) {
@@ -510,14 +510,15 @@ async function tickOnce(session: SessionState): Promise<void> {
       symbol: SYMBOL,
       direction: intent.side === 'BUY' ? 'long' : 'short',
       lotSize: volume,
-      entryPrice: intent.entry ?? bar.c,
-      filledPrice: intent.entry ?? bar.c,
+      entryPrice: r.mt5?.fillPrice ?? intent.entry ?? bar.c,
+      filledPrice: r.mt5?.fillPrice ?? intent.entry ?? bar.c,
       stopLoss: intent.sl,
       takeProfit: intent.tp1,
       setup: intent.setup,
       barTimeMs: bar.t,
       filtersPassed: ['risk_gating'],
       mt5Connected: status.connected,
+      mt5Ticket: r.mt5?.positionId ?? r.mt5?.orderId,
     });
   } else {
     const reason = recordApiFailure(safety, `order: ${r.summary}`);
@@ -587,6 +588,8 @@ async function main() {
         : 'CLI --dry-run'
     : 'LIVE ORDERS ENABLED';
   console.error(`[forward-demo] Poll every ${pollSec}s · risk ${(RISK_PCT * 100).toFixed(2)}% · ${dryLabel}`);
+
+  await seedJcmPositionWatch();
 
   const runTick = async () => {
     const s = loadSession();
