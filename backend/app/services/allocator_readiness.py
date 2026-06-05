@@ -77,12 +77,15 @@ async def build_allocator_readiness_payload(db: AsyncSession) -> dict[str, Any]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             rep = data.get("report", {})
+            gates = rep.get("gates", [])
             payload.update(
                 {
                     "check_ready": rep.get("checkReady", False),
                     "progress_score": rep.get("progressScore", 0),
                     "tier": rep.get("tier", "not_ready"),
-                    "gates": rep.get("gates", []),
+                    "gates": gates,
+                    "gates_passed": sum(1 for g in gates if g.get("pass")),
+                    "gates_total": len(gates) or 9,
                     "blockers": rep.get("blockers", []),
                     "next_milestones": rep.get("nextMilestones", []),
                     "research": data.get("research"),

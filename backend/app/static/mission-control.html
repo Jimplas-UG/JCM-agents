@@ -491,6 +491,46 @@
       color: var(--gold);
       border: 1px solid var(--border);
     }
+    .alloc-bar-wrap {
+      background: rgba(201,162,39,.08);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.15rem;
+      margin-bottom: 1rem;
+    }
+    .alloc-bar-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.65rem;
+    }
+    .alloc-bar-track {
+      height: 10px;
+      background: rgba(0,0,0,.35);
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .alloc-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--gold-dim), var(--gold-light));
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+    .alloc-gate {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid rgba(201,162,39,.1);
+      font-size: 0.82rem;
+    }
+    .alloc-gate:last-child { border-bottom: none; }
+    .alloc-gate-pass { color: var(--green); }
+    .alloc-gate-fail { color: var(--red); }
     @media (max-width: 768px) {
       body { flex-direction: column; }
       aside { width: 100%; }
@@ -538,6 +578,7 @@
       <div id="executive" class="section"></div>
       <div id="regime" class="section"></div>
       <div id="infrastructure" class="section"></div>
+      <div id="allocator" class="section"></div>
       <div id="analytics" class="section"></div>
       <div id="marketing" class="section"></div>
       <div id="agents" class="section"></div>
@@ -566,6 +607,7 @@
     const SECTIONS = [
       ["overview", "Command Overview"],
       ["executive", "Executive Briefing"],
+      ["allocator", "Allocator Progress"],
       ["regime", "Market Regime"],
       ["infrastructure", "Infrastructure"],
       ["analytics", "Quant Analytics"],
@@ -753,6 +795,7 @@
           ? "MT5-connected live P&L · refreshes every 5s"
           : "Supervisory intelligence across the BSv3.2 stack";
         $("overview").innerHTML = hero("Mission Control Snapshot", sub)
+          + (window.__allocator ? renderAllocatorStrip(window.__allocator) : "")
           + metricCardsHtml(overviewMetricCards(ov))
           + openPositionsBlock(ov);
         $("overview").dataset.liveReady = "1";
@@ -992,6 +1035,73 @@
       return `<div class="hero"><div class="hero-label">CEO Copilot</div><div class="hero-title">${title}</div><div class="hero-meta">${meta}</div></div>`;
     }
 
+    function allocatorReadyBadge(alloc) {
+      if (!alloc) return `<span class="badge badge-warn">Loading</span>`;
+      if (alloc.check_ready) return `<span class="badge badge-ok">CHECK-READY</span>`;
+      return `<span class="badge badge-warn">${esc(alloc.progress_score || 0)}/100</span>`;
+    }
+
+    function renderAllocatorStrip(alloc) {
+      if (!alloc) return "";
+      const pct = Math.max(0, Math.min(100, Number(alloc.progress_score) || 0));
+      const gates = `${alloc.gates_passed ?? 0}/${alloc.gates_total ?? 9}`;
+      const closed = alloc.live_closed_trades ?? 0;
+      const target = alloc.live_closed_target ?? 50;
+      return `<div class="alloc-bar-wrap" id="allocator-overview-strip">
+        <div class="alloc-bar-head">
+          <div>
+            <strong style="color:var(--gold-light)">Allocator Progress</strong>
+            <span class="muted" style="margin-left:.5rem">${esc(alloc.tier || "").replace(/_/g," ")}</span>
+          </div>
+          ${allocatorReadyBadge(alloc)}
+        </div>
+        <div class="alloc-bar-track"><div class="alloc-bar-fill" style="width:${pct}%"></div></div>
+        <p class="muted" style="margin-top:.55rem;font-size:.78rem">
+          Gates ${gates} · Live closes ${closed}/${target}
+          ${alloc.check_ready ? " · Ready for LP due diligence" : " · Not yet check-ready"}
+        </p>
+      </div>`;
+    }
+
+    function renderAllocatorBriefingBlock(alloc) {
+      if (!alloc) return "";
+      let html = `<div class="block"><h3>Allocator Progress (LP Due Diligence) ${allocatorReadyBadge(alloc)}</h3>`;
+      if (alloc.headline) html += `<p style="margin:.5rem 0;line-height:1.5">${esc(alloc.headline)}</p>`;
+      html += `<div class="alloc-bar-track" style="margin:.65rem 0"><div class="alloc-bar-fill" style="width:${Math.min(100, alloc.progress_score||0)}%"></div></div>`;
+      (alloc.gates || []).forEach(g => {
+        const cls = g.pass ? "alloc-gate-pass" : "alloc-gate-fail";
+        const mark = g.pass ? "PASS" : "FAIL";
+        html += `<div class="alloc-gate ${cls}"><span>[${mark}] ${esc(g.label || g.code)}</span><span class="muted">${esc(g.current)} → ${esc(g.target)}</span></div>`;
+      });
+      const milestones = alloc.next_milestones || alloc.blockers || [];
+      if (milestones.length) {
+        html += `<p class="muted" style="margin-top:.75rem"><strong>Next milestones</strong></p><ul>`;
+        milestones.forEach(m => { html += `<li>${esc(m)}</li>`; });
+        html += `</ul>`;
+      }
+      html += `</div>`;
+      return html;
+    }
+
+    function paintAllocatorPanel(alloc) {
+      if (!alloc) {
+        $("allocator").innerHTML = hero("Allocator Progress", "LP due-diligence gates") +
+          `<div class="block"><p class="muted">Loading allocator readiness…</p></div>`;
+        return;
+      }
+      const research = alloc.research_pf != null
+        ? `Research attestation: PF ${fmt(alloc.research_pf, 2)} · ${alloc.research_trades || "—"} trades`
+        : "Research attestation pending — run realistic MT5 backtest";
+      $("allocator").innerHTML = hero(
+        "Allocator Progress",
+        `Path to institutional capital · ${alloc.gates_passed}/${alloc.gates_total} gates · ${research}`
+      ) + renderAllocatorBriefingBlock(alloc) + `
+        <div class="block"><h3>Tear Sheet</h3>
+          <p class="muted">Full LP factsheet: <code>/dashboard/allocator-tear-sheet</code></p>
+          <p style="margin-top:.5rem">Stale JCM opens: <strong>${alloc.stale_jcm_opens ?? 0}</strong></p>
+        </div>`;
+    }
+
     function missionBadge(st) {
       const s = (st || "GREEN").toUpperCase();
       const cls = s === "RED" ? "badge-err" : s === "YELLOW" ? "badge-warn" : "badge-ok";
@@ -1014,6 +1124,9 @@
         html += `<p style="margin:.65rem 0;line-height:1.55;color:var(--text)">${esc(p)}</p>`;
       });
       html += `</div>`;
+
+      const alloc = v.allocator_progress || b.allocator_progress;
+      if (alloc) html += renderAllocatorBriefingBlock(alloc);
 
       (v.agent_reports || []).forEach(ar => {
         html += `<div class="block briefing-agent"><h3>${esc(ar.agent_name)} ${missionBadge(ar.mission_status)}</h3>`;
@@ -1287,7 +1400,7 @@
       try {
         if (initial) {
           $("status").textContent = "Loading snapshot…";
-          ["executive", "regime", "infrastructure", "analytics", "marketing", "alerts"].forEach((id) => {
+          ["executive", "allocator", "regime", "infrastructure", "analytics", "marketing", "alerts"].forEach((id) => {
             $(id).innerHTML = loadingBlock("Loading…");
           });
         } else if (!document.hidden) {
@@ -1316,14 +1429,16 @@
           get("/dashboard/research?status=pending&limit=10", 12000).catch(() => []),
         ]);
         const briefingP = get("/dashboard/briefing", 8000).catch(() => null);
+        const allocatorP = get("/dashboard/allocator-readiness", 12000).catch(() => null);
 
-        const [registry, agentsHealth, audit, panelResults, briefingRaw, perfEarly] = await Promise.all([
+        const [registry, agentsHealth, audit, panelResults, briefingRaw, perfEarly, allocatorRaw] = await Promise.all([
           registryP,
           agentsHealthP,
           auditP,
           panelsP,
           briefingP,
           perfP,
+          allocatorP,
         ]);
         paintAgents(registry, agentsHealth, audit);
 
@@ -1335,6 +1450,57 @@
         const briefing = briefingRaw && briefingRaw.ready === false ? null : briefingRaw;
 
         const perfResolved = perf || perfEarly;
+        const allocPayload = allocatorRaw || briefing?.allocator_progress || null;
+        if (allocPayload && !allocPayload.gates && allocPayload.blockers) {
+          window.__allocator = {
+            check_ready: allocPayload.check_ready,
+            progress_score: allocPayload.progress_score,
+            tier: allocPayload.tier,
+            gates_passed: (allocPayload.gates || []).filter(g => g.pass).length,
+            gates_total: (allocPayload.gates || []).length || 9,
+            gates: allocPayload.gates || [],
+            blockers: allocPayload.blockers,
+            next_milestones: allocPayload.next_milestones || [],
+            live_closed_trades: allocPayload.jcm_trades?.closed ?? 0,
+            live_closed_target: 50,
+            stale_jcm_opens: allocPayload.stale_jcm_opens ?? 0,
+            research_pf: allocPayload.research?.profit_factor,
+            research_trades: allocPayload.research?.trades,
+            headline: allocPayload.check_ready
+              ? "Allocator check-ready"
+              : `Allocator progress ${allocPayload.progress_score}/100`,
+          };
+        } else if (allocPayload) {
+          window.__allocator = {
+            check_ready: allocPayload.check_ready,
+            progress_score: allocPayload.progress_score,
+            tier: allocPayload.tier,
+            gates_passed: (allocPayload.gates || []).filter(g => g.pass).length,
+            gates_total: (allocPayload.gates || []).length || 9,
+            gates: allocPayload.gates || [],
+            blockers: allocPayload.blockers || [],
+            next_milestones: allocPayload.next_milestones || [],
+            live_closed_trades: allocPayload.jcm_trades?.closed ?? allocPayload.live_closed_trades ?? 0,
+            live_closed_target: 50,
+            stale_jcm_opens: allocPayload.stale_jcm_opens ?? 0,
+            research_pf: allocPayload.research?.profit_factor ?? allocPayload.research_pf,
+            research_trades: allocPayload.research?.trades ?? allocPayload.research_trades,
+            headline: allocPayload.headline || (allocPayload.check_ready ? "Check-ready" : `Progress ${allocPayload.progress_score}/100`),
+          };
+        } else if (briefing?.allocator_progress) {
+          window.__allocator = briefing.allocator_progress;
+        }
+        paintAllocatorPanel(window.__allocator);
+        const strip = document.getElementById("allocator-overview-strip");
+        if (strip && window.__allocator) {
+          strip.outerHTML = renderAllocatorStrip(window.__allocator);
+        } else if (window.__allocator && $("overview").dataset.liveReady) {
+          const ovHero = $("overview").querySelector(".hero");
+          if (ovHero && !$("overview").querySelector("#allocator-overview-strip")) {
+            ovHero.insertAdjacentHTML("afterend", renderAllocatorStrip(window.__allocator));
+          }
+        }
+
         if (briefing) {
           paintBriefingPanels(briefing, ov, perfResolved);
         } else {

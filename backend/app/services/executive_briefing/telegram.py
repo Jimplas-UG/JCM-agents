@@ -45,6 +45,11 @@ def format_executive_briefing_telegram(
     wr = perf.get("win_rate")
     wr_txt = f"{float(wr) * 100:.0f}%" if wr is not None else "n/a"
 
+    alloc = briefing.get("allocator_progress") or {}
+    alloc_score = int(alloc.get("progress_score") or 0)
+    alloc_ready = "YES" if alloc.get("check_ready") else "NO"
+    alloc_gates = f"{alloc.get('gates_passed', 0)}/{alloc.get('gates_total', 9)}"
+
     lines = [
         "*JIMPLAS CAPITAL MANAGEMENT*",
         "*Daily Executive Intelligence Brief*",
@@ -58,6 +63,7 @@ def format_executive_briefing_telegram(
         f"• Open positions: `{positions}` · Risk score: `{risk_score:.1f}` · Drawdown: `{dd:.1f}%`",
         f"• Infrastructure health: `{health:.0f}%` · BSv3.2 engine: `{engine}` · Regime: `{regime}`",
         f"• Performance (today): win rate `{wr_txt}`",
+        f"• Allocator progress: `{alloc_score}/100` · check-ready `{alloc_ready}` · gates `{alloc_gates}`",
         "",
         "*Executive recap:*",
         f"_{headline}_",

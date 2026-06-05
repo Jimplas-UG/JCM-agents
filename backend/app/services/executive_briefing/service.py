@@ -19,6 +19,8 @@ from app.services.executive_briefing.synthesis import (
     build_strategic_synthesis,
     overall_mission_status,
 )
+from app.services.allocator_progress_briefing import build_allocator_briefing_block
+from app.services.allocator_readiness import build_allocator_readiness_payload
 from app.services.executive_briefing.types import ExecutiveBriefingDocument
 
 
@@ -30,20 +32,23 @@ async def build_executive_briefing(
     ctx = await load_briefing_context(db, today)
     reports = build_all_agent_reports(ctx)
     mission_status = overall_mission_status(reports, ctx)
+    allocator_raw = await build_allocator_readiness_payload(db)
+    allocator_block = build_allocator_briefing_block(allocator_raw)
 
-    actions = build_action_board(ctx, reports)
+    actions = build_action_board(ctx, reports, allocator_block)
     doc: ExecutiveBriefingDocument = {
         "format_version": 2,
         "title": "JCM MISSION CONTROL\nDAILY EXECUTIVE BRIEFING",
         "briefing_date": str(today),
         "prepared_for": f"{settings.executive_briefing_ceo_name}, CEO\nJimplas Capital Management",
         "mission_status": mission_status,
-        "executive_summary": build_executive_summary(ctx, reports, mission_status),
+        "executive_summary": build_executive_summary(ctx, reports, mission_status, allocator_block),
         "agent_reports": reports,
         "ceo_strategic_synthesis": build_strategic_synthesis(ctx, reports),
         "ceo_action_board": actions,
         "ceo_decision_board": build_decision_board(ctx, reports),
         "commander_assessment": build_commander_assessment(ctx, reports, actions),
+        "allocator_progress": allocator_block,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
     doc["rendered_markdown"] = render_executive_briefing(doc)
@@ -74,6 +79,7 @@ def briefing_to_legacy_payload(doc: ExecutiveBriefingDocument, ctx: Any = None) 
         "ceo_action_board": doc.get("ceo_action_board"),
         "ceo_decision_board": doc.get("ceo_decision_board"),
         "commander_assessment": doc.get("commander_assessment"),
+        "allocator_progress": doc.get("allocator_progress"),
         "bsv32_system": {
             "status": state.bsv32_status if state else "unknown",
             "running": state.bsv32_status == "running" if state else False,

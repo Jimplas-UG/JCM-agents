@@ -45,5 +45,6 @@ class ExecutiveBriefingDocument(TypedDict, total=False):
     ceo_action_board: list[ActionRow]
     ceo_decision_board: list[DecisionRow]
     commander_assessment: dict[str, object]
+    allocator_progress: dict[str, object]
     rendered_markdown: str
     generated_at: str

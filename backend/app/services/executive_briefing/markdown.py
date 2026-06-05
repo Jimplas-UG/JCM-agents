@@ -22,6 +22,33 @@ def render_executive_briefing(doc: ExecutiveBriefingDocument) -> str:
         lines.append(p)
         lines.append("")
 
+    alloc = doc.get("allocator_progress") or {}
+    if alloc:
+        lines.append("## Allocator Progress (LP Due Diligence)")
+        lines.append("")
+        ready = "YES" if alloc.get("check_ready") else "NO"
+        lines.append(
+            f"**Check-ready:** {ready} · **Progress:** {alloc.get('progress_score', 0)}/100 "
+            f"· **Gates:** {alloc.get('gates_passed', 0)}/{alloc.get('gates_total', 9)}"
+        )
+        lines.append("")
+        if alloc.get("headline"):
+            lines.append(alloc["headline"])
+            lines.append("")
+        for g in alloc.get("gates") or []:
+            mark = "PASS" if g.get("pass") else "FAIL"
+            lines.append(
+                f"- [{mark}] {g.get('label', g.get('code', ''))}: {g.get('current', '')} "
+                f"(target {g.get('target', '')})"
+            )
+        lines.append("")
+        blockers = alloc.get("blockers") or alloc.get("next_milestones") or []
+        if blockers:
+            lines.append("**Next milestones:**")
+            for b in blockers:
+                lines.append(f"- {b}")
+            lines.append("")
+
     lines.append("---")
     lines.append("")
     lines.append("## Agent Reports")

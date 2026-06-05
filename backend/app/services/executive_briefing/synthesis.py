@@ -23,7 +23,10 @@ def overall_mission_status(reports: list[AgentReport], ctx: BriefingContext) -> 
 
 
 def build_executive_summary(
-    ctx: BriefingContext, reports: list[AgentReport], mission_status: MissionStatus
+    ctx: BriefingContext,
+    reports: list[AgentReport],
+    mission_status: MissionStatus,
+    allocator: dict | None = None,
 ) -> list[str]:
     equity = float(ctx.state.account_equity or 0) if ctx.state else 0
     open_n = len(ctx.open_trades)
@@ -72,6 +75,11 @@ def build_executive_summary(
             "rather than unverified live returns. Highest near-term ROI is execution reliability plus content approval."
         ),
     ]
+
+    if allocator:
+        alloc_para = allocator.get("summary_paragraph") or allocator.get("headline", "")
+        if alloc_para:
+            paras.append(f"Allocator capital path: {alloc_para}")
 
     if mission_status == "RED":
         paras.append(
@@ -143,7 +151,9 @@ def build_strategic_synthesis(
     }
 
 
-def build_action_board(ctx: BriefingContext, reports: list[AgentReport]) -> list[ActionRow]:
+def build_action_board(
+    ctx: BriefingContext, reports: list[AgentReport], allocator: dict | None = None
+) -> list[ActionRow]:
     rows: list[ActionRow] = []
     prio = 1
 
@@ -162,6 +172,19 @@ def build_action_board(ctx: BriefingContext, reports: list[AgentReport]) -> list
                 owner="COO / Ops",
                 deadline="Today 12:00",
                 impact="Revenue — trading resumes",
+            )
+        )
+        prio += 1
+
+    if allocator and not allocator.get("check_ready"):
+        milestone = (allocator.get("next_milestones") or allocator.get("blockers") or [""])[0]
+        rows.append(
+            ActionRow(
+                priority=prio,
+                action=f"Allocator gate focus: {milestone[:120]}",
+                owner="COO / Ops",
+                deadline="This week",
+                impact="Capital — path to allocator check",
             )
         )
         prio += 1
