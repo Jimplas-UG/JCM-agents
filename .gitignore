@@ -18,3 +18,11 @@ reports/forward-demo-log.jsonl
 reports/forward-demo-journal.json
 reports/forward-execution-audit-report.txt
 wordpress/
+
+# Session debug / one-off probes (use vps-precommit-audit.ps1, vps-audit-forward-alignment.ps1)
+scripts/_*.py
+scripts/vps-*-debug.ps1
+scripts/vps-probe-*.ps1
+scripts/vps-push-*-fix.ps1
+scripts/vps-refresh-mission-stack.ps1
+scripts/vps-run-ingest-probe*.ps1
