@@ -48,7 +48,6 @@ class ExecutionQualityAgent(BaseAgent):
             anomaly_flag=anomaly,
         )
         self.db.add(log)
-        await self.db.flush()
 
         if anomaly:
             await self._flag_anomaly(trade, log)

@@ -1,6 +1,5 @@
 """Event ingestion pipeline — routes BSv3.2 events to supervisory agents."""
 
-import asyncio
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,11 +35,9 @@ class EventPipeline:
             data = TradeEventIngest(**payload)
             trade, created = await self.memory.record_trade_event(data)
             if created:
-                await asyncio.gather(
-                    self.explain.explain_trade_approved(payload),
-                    self.execution.record_from_trade(trade),
-                )
-                _mark_ingest("quant_memory", "explainability")
+                await self.explain.explain_trade_approved(payload)
+                await self.execution.record_from_trade(trade)
+                _mark_ingest("quant_memory", "explainability", "execution_quality")
             return {
                 "status": "recorded" if created else "duplicate",
                 "event_id": data.event_id,
@@ -50,11 +47,9 @@ class EventPipeline:
             data = TradeEventIngest(**payload)
             trade, created = await self.memory.record_trade_event(data)
             if created:
-                await asyncio.gather(
-                    self.explain.explain_trade_closed(payload, trade.event_id),
-                    self.execution.record_from_trade(trade),
-                )
-                _mark_ingest("quant_memory", "explainability")
+                await self.explain.explain_trade_closed(payload, trade.event_id)
+                await self.execution.record_from_trade(trade)
+                _mark_ingest("quant_memory", "explainability", "execution_quality")
             return {
                 "status": "closed" if created else "duplicate",
                 "event_id": data.event_id,

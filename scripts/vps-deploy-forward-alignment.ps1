@@ -54,7 +54,12 @@ try { Invoke-RestMethod "http://127.0.0.1:8765/api/reconnect" -Method POST -Time
 
 $fwdLauncher = "C:\opt\bilshenz\deploy\windows\run-forward-bot.ps1"
 if (Test-Path $fwdLauncher) {
-  (Get-Content $fwdLauncher -Raw) -replace '(?<!scripts/)run-forward-demo-30d\.ts','scripts/run-forward-demo-30d.ts' | Set-Content $fwdLauncher -Encoding UTF8
+  $raw = Get-Content $fwdLauncher -Raw
+  $raw = $raw -replace 'scripts/scripts/run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
+  if ($raw -notmatch 'scripts/run-forward-demo-30d\.ts') {
+    $raw = $raw -replace '(?<!scripts/)run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
+  }
+  Set-Content $fwdLauncher $raw -Encoding UTF8
 }
 foreach ($tn in @("Bilshenz-ForwardBot-Sys","Bilshenz-ForwardBot")) {
   schtasks /Query /TN $tn 2>$null | Out-Null

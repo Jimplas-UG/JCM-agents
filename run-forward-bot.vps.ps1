@@ -4,13 +4,10 @@ $Backend = Join-Path $AppDir 'backend'
 $LogDir = $env:TRADINGBOT_LOG_DIR
 if (-not $LogDir) { $LogDir = 'C:\logs\tradingbot' }
 $ErrLog = Join-Path $LogDir 'forward-bot.err.log'
+$OutLog = Join-Path $LogDir 'forward-bot.out.log'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 function Test-ForwardAlive {
-    $err = Get-Item $ErrLog -ErrorAction SilentlyContinue
-    if ($err -and $err.Length -gt 0 -and ((Get-Date) - $err.LastWriteTime).TotalSeconds -lt 120) {
-        return $true
-    }
     $node = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo-30d'
     }
@@ -41,8 +38,11 @@ if (-not (Test-Path $tsxCli)) {
     exit 1
 }
 
-# Append logs (do not truncate); no stdout redirect lock issues
-$cmd = "node `"$tsxCli`" scripts/run-forward-demo-30d.ts 2>&1 | ForEach-Object { `$_ | Out-File -FilePath `"$ErrLog`" -Append -Encoding utf8; `$_ }"
-Start-Process powershell.exe -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', $cmd -WorkingDirectory $Backend
+# Append logs via cmd — avoids PowerShell pipe / redirect buffer stalls under SYSTEM
+$logAppend = ">> `"$ErrLog`" 2>&1"
+Start-Process -FilePath 'cmd.exe' `
+    -ArgumentList @('/c', "node `"$tsxCli`" scripts/run-forward-demo-30d.ts $logAppend") `
+    -WorkingDirectory $Backend `
+    -WindowStyle Hidden
 Write-Host 'Started forward bot'
 exit 0

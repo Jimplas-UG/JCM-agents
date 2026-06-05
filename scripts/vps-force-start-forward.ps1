@@ -37,7 +37,12 @@ $vt = "$Backend\validation"
 if (-not (Test-Path $vj)) { cmd /c mklink /J "$vj" "$vt" 2>$null }
 $fwdLauncher = "C:\opt\bilshenz\deploy\windows\run-forward-bot.ps1"
 if (Test-Path $fwdLauncher) {
-    (Get-Content $fwdLauncher -Raw) -replace 'run-forward-demo-30d\.ts','scripts/run-forward-demo-30d.ts' | Set-Content $fwdLauncher -Encoding UTF8
+    $raw = Get-Content $fwdLauncher -Raw
+    $raw = $raw -replace 'scripts/scripts/run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
+    if ($raw -notmatch 'scripts/run-forward-demo-30d\.ts') {
+        $raw = $raw -replace '(?<!scripts/)run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
+    }
+    Set-Content $fwdLauncher $raw -Encoding UTF8
 }
 Get-CimInstance Win32_Process -EA SilentlyContinue | Where-Object {
     $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo'

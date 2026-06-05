@@ -1,4 +1,4 @@
-# Forward-demo execution preflight — MT5 must be connected + algo trading enabled.
+# Forward-demo execution preflight - MT5 must be connected + algo trading enabled.
 # Run on VPS: powershell -File C:\jcm-project\scripts\vps-forward-preflight.ps1
 $ErrorActionPreference = "Continue"
 $mt5 = "http://127.0.0.1:8765/api/status"
@@ -13,7 +13,7 @@ try {
     Write-Host "Server:" $s.account.server "Equity:" $s.account.equity
     if (-not $s.connected) { Write-Host "FAIL: MT5 API not connected" -ForegroundColor Red }
     if (-not $s.terminal_trade_allowed) {
-        Write-Host "FAIL: Enable Algo Trading in MT5 (toolbar) — causes retcode 10027" -ForegroundColor Red
+        Write-Host "FAIL: Enable Algo Trading in MT5 (toolbar) - causes retcode 10027" -ForegroundColor Red
     }
     if (-not $s.account.trade_allowed) {
         Write-Host "WARN: Account trade_allowed=false" -ForegroundColor Yellow
@@ -25,7 +25,8 @@ try {
 
 try {
     $d = Invoke-RestMethod $desk -TimeoutSec 5
-    Write-Host "Desk API:" ($d.status ?? "ok")
+    $deskStatus = if ($d.status) { $d.status } else { "ok" }
+    Write-Host "Desk API:" $deskStatus
 } catch {
     Write-Host "WARN: Desk API not reachable" -ForegroundColor Yellow
 }

@@ -44,6 +44,25 @@ if ((Test-Path $vt) -and -not (Test-Path $vj)) {
     cmd /c mklink /J "$vj" "$vt" 2>$null
     Log "Linked scripts/validation -> validation"
 }
+$fwdLauncher = "C:\opt\bilshenz\deploy\windows\run-forward-bot.ps1"
+$repoLauncher = "C:\jcm-project\run-forward-bot.vps.ps1"
+if (Test-Path $repoLauncher) {
+    Copy-Item $repoLauncher $fwdLauncher -Force
+    Log "Synced run-forward-bot.ps1 from jcm-project"
+} elseif (Test-Path $fwdLauncher) {
+    $raw = Get-Content $fwdLauncher -Raw
+    $raw = $raw -replace 'scripts/scripts/run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
+    $raw = $raw -replace '(?s)function Test-ForwardAlive \{.*?\n\}', @'
+function Test-ForwardAlive {
+    $node = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo-30d'
+    }
+    return [bool]$node
+}
+'@
+    Set-Content $fwdLauncher $raw -Encoding UTF8
+    Log "Patched forward launcher on VPS"
+}
 
 # 4. Bilshenz services via tasks (never kill python globally)
 function Ensure-Port([int]$port, [string]$task) {
