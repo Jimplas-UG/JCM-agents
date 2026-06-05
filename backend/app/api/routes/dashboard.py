@@ -25,6 +25,9 @@ from app.schemas.events import (
     TradeEventResponse,
 )
 from app.services.agent_orchestrator import get_action_audit
+from app.services.allocator_readiness import build_allocator_readiness_payload
+from app.services.allocator_tear_sheet import build_allocator_tear_sheet
+from app.services.execution_halt import clear_halt, engage_halt, halt_status
 from app.services.institutional_readiness import build_institutional_readiness_payload
 from app.services.live_dashboard import build_live_tick
 
@@ -288,6 +291,41 @@ async def get_institutional_readiness(
 ) -> dict:
     """Composite institutional score (Bilshenz report + JCM trade counts)."""
     return await build_institutional_readiness_payload(db)
+
+
+@router.get("/allocator-readiness")
+async def get_allocator_readiness(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """LP due-diligence gates — all must pass before allocator check-ready."""
+    return await build_allocator_readiness_payload(db)
+
+
+@router.get("/allocator-tear-sheet")
+async def get_allocator_tear_sheet(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Investor factsheet for allocator due diligence."""
+    return await build_allocator_tear_sheet(db)
+
+
+@router.get("/risk/halt-status")
+async def get_halt_status() -> dict:
+    return halt_status()
+
+
+@router.post("/risk/engage-halt")
+async def post_engage_halt(
+    reason: str = Query(..., min_length=3, max_length=500),
+) -> dict:
+    """Manual kill-switch — stops forward bot via Bilshenz safety failsafe."""
+    return engage_halt(reason=reason, source="mission_control")
+
+
+@router.post("/risk/clear-halt")
+async def post_clear_halt() -> dict:
+    """Clear failsafe after operator review."""
+    return clear_halt(cleared_by="mission_control")
 
 
 @router.get("/briefing/history")

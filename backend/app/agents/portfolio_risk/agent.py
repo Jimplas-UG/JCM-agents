@@ -18,6 +18,7 @@ from app.models.tables import (
     TradeOutcome,
 )
 from app.services.alerting import AlertService
+from app.services.execution_halt import engage_halt
 
 
 class PortfolioRiskOrchestrator(BaseAgent):
@@ -94,9 +95,13 @@ class PortfolioRiskOrchestrator(BaseAgent):
             await alert_svc.create_alert(
                 agent_source=self.name,
                 severity=AlertSeverity.emergency.value,
-                title="Kill-Switch Recommended",
-                message="Account drawdown threshold breached. Human intervention required.",
+                title="Kill-Switch Engaged",
+                message="Drawdown threshold breached — forward execution halted via safety failsafe.",
                 metadata={"account_dd": account_dd, "daily_dd": daily_dd},
+            )
+            engage_halt(
+                reason=f"portfolio_risk: account_dd={account_dd:.2f}% daily_dd={daily_dd:.2f}%",
+                source=self.name,
             )
 
         return snapshot

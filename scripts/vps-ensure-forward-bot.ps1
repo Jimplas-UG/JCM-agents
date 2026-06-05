@@ -166,7 +166,24 @@ if (Test-Path $agentStarter) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $agentStarter 2>&1 | ForEach-Object { Log $_ }
 }
 
-# 10. Institutional ops telemetry
+# 10. Allocator pipeline (backfill + tear sheet) — daily
+$allocatorMarker = "C:\logs\tradingbot\last-allocator-pipeline.txt"
+$runAllocator = $false
+$allocatorScript = "C:\jcm-project\scripts\vps-run-allocator-pipeline.ps1"
+if (Test-Path $allocatorScript) {
+    if (-not (Test-Path $allocatorMarker)) { $runAllocator = $true }
+    else {
+        $lastA = (Get-Item $allocatorMarker).LastWriteTime
+        if ((Get-Date) - $lastA -gt [TimeSpan]::FromHours(24)) { $runAllocator = $true }
+    }
+}
+if ($runAllocator) {
+    Log "Running allocator pipeline (backfill + gates)..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $allocatorScript 2>&1 | ForEach-Object { Log $_ }
+    New-Item -ItemType File -Force -Path $allocatorMarker | Out-Null
+}
+
+# 11. Institutional ops telemetry
 $riskPct = if ($env:RISK_PCT) { [double]$env:RISK_PCT * 100 } else { 1.0 }
 Log "RISK_PCT=$riskPct% CONSECUTIVE_LOSS_LIMIT=$($env:CONSECUTIVE_LOSS_LIMIT)"
 
@@ -199,7 +216,7 @@ if ($runReadiness) {
     New-Item -ItemType File -Force -Path $readinessMarker | Out-Null
 }
 
-# 11. Health summary
+# 12. Health summary
 Log "--- SUMMARY ---"
 try {
     $tick = Invoke-RestMethod "http://127.0.0.1:8765/api/tick/XAUUSD" -TimeoutSec 8
