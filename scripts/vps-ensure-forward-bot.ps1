@@ -166,7 +166,40 @@ if (Test-Path $agentStarter) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File $agentStarter 2>&1 | ForEach-Object { Log $_ }
 }
 
-# 10. Health summary
+# 10. Institutional ops telemetry
+$riskPct = if ($env:RISK_PCT) { [double]$env:RISK_PCT * 100 } else { 1.0 }
+Log "RISK_PCT=$riskPct% CONSECUTIVE_LOSS_LIMIT=$($env:CONSECUTIVE_LOSS_LIMIT)"
+
+$jsonl = "C:\opt\bilshenz\backend\validation\data\forward-demo-events.jsonl"
+if (Test-Path $jsonl) {
+    $signals = 0; $fills = 0
+    Get-Content $jsonl -Tail 5000 -ErrorAction SilentlyContinue | ForEach-Object {
+        if ($_ -match '"type"\s*:\s*"SIGNAL"') { $signals++ }
+        if ($_ -match '"type"\s*:\s*"ORDER_FILL"') { $fills++ }
+    }
+    if ($signals -gt 0) {
+        $fillPct = [math]::Round(($fills / $signals) * 100, 1)
+        Log "Signal-to-fill (tail): $fillPct% ($fills/$signals)"
+    }
+}
+
+$readinessScript = "C:\jcm-project\scripts\vps-run-institutional-readiness.ps1"
+$readinessMarker = "C:\logs\tradingbot\last-readiness-run.txt"
+$runReadiness = $false
+if (Test-Path $readinessScript) {
+    if (-not (Test-Path $readinessMarker)) { $runReadiness = $true }
+    else {
+        $last = (Get-Item $readinessMarker).LastWriteTime
+        if ((Get-Date) - $last -gt [TimeSpan]::FromHours(24)) { $runReadiness = $true }
+    }
+}
+if ($runReadiness) {
+    Log "Running daily institutional readiness report..."
+    & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript 2>&1 | ForEach-Object { Log $_ }
+    New-Item -ItemType File -Force -Path $readinessMarker | Out-Null
+}
+
+# 11. Health summary
 Log "--- SUMMARY ---"
 try {
     $tick = Invoke-RestMethod "http://127.0.0.1:8765/api/tick/XAUUSD" -TimeoutSec 8

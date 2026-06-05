@@ -27,6 +27,7 @@ import { m30ToM15Bars } from '../engine/m15Bars';
 import type { Bar, TradeJournalRow } from '../engine/types';
 import {
   appendSafetyLog,
+  consecutiveLossHalt,
   dailyLossBreached,
   envDryRunEnabled,
   isDuplicateOrder,
@@ -60,7 +61,7 @@ const MT5_API = (process.env.MT5_API_URL ?? 'http://127.0.0.1:8765').replace(/\/
 const SYMBOL = process.env.MT5_SYMBOL?.trim() || 'XAUUSD';
 const M30_MS = 30 * 60 * 1000;
 const WARMUP_BARS = 200;
-const RISK_PCT = Math.max(0.0001, Math.min(0.05, Number(process.env.RISK_PCT ?? '0.005') || 0.005));
+const RISK_PCT = Math.max(0.0001, Math.min(0.05, Number(process.env.RISK_PCT ?? '0.01') || 0.01));
 const DAYS = 30;
 const POLL_SEC_DEFAULT = Math.max(15, parseInt(process.env.FORWARD_POLL_SEC ?? '45', 10) || 45);
 
@@ -372,6 +373,26 @@ async function tickOnce(session: SessionState): Promise<void> {
     return;
   }
 
+  const lossStreak = consecutiveLossHalt(journalRows);
+  if (lossStreak.halted) {
+    logForwardMissed({
+      reason: `consecutive loss streak ${lossStreak.streak} >= ${lossStreak.limit}`,
+      barTimeMs: bar.t,
+    });
+    void publishTradeBlocked({
+      symbol: SYMBOL,
+      blockedBy: ['consecutive_loss_streak'],
+    });
+    console.error(
+      `[forward-demo] ${new Date(bar.t).toISOString()} blocked: loss streak ${lossStreak.streak}`
+    );
+    session.lastClosedBarT = bar.t;
+    saveJournal(journalRows);
+    saveSession(session);
+    saveSafetyState(safety);
+    return;
+  }
+
   const snap = computeBilshenzSnapshot({
     bundle,
     cfg,
@@ -504,7 +525,20 @@ async function tickOnce(session: SessionState): Promise<void> {
       },
       { maxJournalRows: 5000 }
     );
-    saveJournal(next.rows);
+    const mt5Ticket = r.mt5?.positionId ?? r.mt5?.orderId;
+    const rowsWithTicket = [...next.rows];
+    if (mt5Ticket != null && rowsWithTicket.length > 0) {
+      const last = rowsWithTicket[rowsWithTicket.length - 1] as TradeJournalRow & {
+        ticket?: number;
+        mt5_ticket?: number;
+      };
+      rowsWithTicket[rowsWithTicket.length - 1] = {
+        ...last,
+        ticket: Number(mt5Ticket),
+        mt5_ticket: Number(mt5Ticket),
+      };
+    }
+    saveJournal(rowsWithTicket);
     console.error(`[forward-demo] EXEC ${intent.side} ${intent.setup} vol=${volume} · ${r.summary}`);
     void publishTradeExecuted({
       symbol: SYMBOL,

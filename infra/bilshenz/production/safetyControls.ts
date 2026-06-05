@@ -19,6 +19,7 @@ const STATE_PATH = process.env.SAFETY_STATE_PATH ?? path.join(DEFAULT_LOG_DIR, '
 const MAX_DAILY_LOSS_PCT = Number(process.env.MAX_DAILY_LOSS_PCT ?? '3');
 const MAX_API_FAILURES = Number(process.env.MAX_API_FAILURES ?? '8');
 const MAX_DAILY_TRADES = Number(process.env.MAX_DAILY_TRADES ?? '0');
+const CONSECUTIVE_LOSS_LIMIT = Number(process.env.CONSECUTIVE_LOSS_LIMIT ?? '4');
 
 export function maxDailyTradesLimit(frozenDefault: number): number {
   if (MAX_DAILY_TRADES > 0) return Math.min(25, Math.floor(MAX_DAILY_TRADES));
@@ -134,4 +135,27 @@ export function clearFailsafe(s: SafetyState): void {
   s.failsafe = false;
   s.failsafeReason = null;
   s.consecutiveApiFailures = 0;
+}
+
+/** Count trailing closed losses from journal outcomes (institutional streak gate). */
+export function consecutiveLossStreak(
+  rows: Array<{ out?: string | null }>
+): number {
+  let streak = 0;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const out = rows[i]?.out;
+    if (!out || out === 'OPEN') continue;
+    if (out === 'LOSS') streak += 1;
+    else if (out === 'HALF_LOSS') streak += 0.5;
+    else break;
+  }
+  return streak;
+}
+
+export function consecutiveLossHalt(
+  rows: Array<{ out?: string | null }>
+): { halted: boolean; streak: number; limit: number } {
+  const streak = consecutiveLossStreak(rows);
+  const limit = CONSECUTIVE_LOSS_LIMIT;
+  return { halted: limit > 0 && streak >= limit, streak, limit };
 }

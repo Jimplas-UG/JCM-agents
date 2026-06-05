@@ -25,6 +25,7 @@ from app.schemas.events import (
     TradeEventResponse,
 )
 from app.services.agent_orchestrator import get_action_audit
+from app.services.institutional_readiness import build_institutional_readiness_payload
 from app.services.live_dashboard import build_live_tick
 
 router = APIRouter(
@@ -279,6 +280,14 @@ async def generate_ceo_briefing(db: AsyncSession = Depends(get_db_session)) -> d
         return row.briefing_json
     agent = CeoCopilotAgent(db)
     return await agent.generate_daily_briefing()
+
+
+@router.get("/institutional-readiness")
+async def get_institutional_readiness(
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Composite institutional score (Bilshenz report + JCM trade counts)."""
+    return await build_institutional_readiness_payload(db)
 
 
 @router.get("/briefing/history")

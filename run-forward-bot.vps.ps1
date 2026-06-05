@@ -14,21 +14,25 @@ function Test-ForwardAlive {
     return [bool]$node
 }
 
-if (Test-ForwardAlive) {
-    Write-Host 'Forward bot already active'
+$existing = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo-30d'
+})
+if ($existing.Count -eq 1) {
+    Write-Host 'Forward bot already active PID' $existing[0].ProcessId
     exit 0
 }
-
-$task = Get-ScheduledTask -TaskName 'Bilshenz-ForwardBot' -ErrorAction SilentlyContinue
-if ($task -and $task.State -eq 'Running') {
-    Write-Host 'ForwardBot task already running'
-    exit 0
+if ($existing.Count -gt 1) {
+    foreach ($p in $existing) {
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 3
 }
 
 Set-Location $Backend
 $env:PRODUCTION_MODE = '1'
 $env:PRODUCTION_NO_EXPIRY = '1'
 $env:STRATEGY_FREEZE = '1'
+$env:RISK_PCT = '0.01'
 
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = 'node.exe' }
@@ -38,11 +42,18 @@ if (-not (Test-Path $tsxCli)) {
     exit 1
 }
 
-# Append logs via cmd — avoids PowerShell pipe / redirect buffer stalls under SYSTEM
-$logAppend = ">> `"$ErrLog`" 2>&1"
-Start-Process -FilePath 'cmd.exe' `
-    -ArgumentList @('/c', "node `"$tsxCli`" scripts/run-forward-demo-30d.ts $logAppend") `
+# Detached node — cmd /c would exit and can strand short-lived workers under SYSTEM tasks
+$args = "`"$tsxCli`" scripts/run-forward-demo-30d.ts"
+Start-Process -FilePath $node `
+    -ArgumentList $args `
     -WorkingDirectory $Backend `
-    -WindowStyle Hidden
-Write-Host 'Started forward bot'
-exit 0
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $OutLog `
+    -RedirectStandardError $ErrLog
+Start-Sleep -Seconds 8
+if (Test-ForwardAlive) {
+    Write-Host 'Started forward bot'
+    exit 0
+}
+Write-Host 'FAIL: forward bot did not stay up — check forward-bot.err.log'
+exit 1
