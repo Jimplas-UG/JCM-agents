@@ -32,8 +32,17 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(
                 "Production security misconfiguration: " + "; ".join(issues)
             )
-    yield
-    await close_redis()
+    from app.workers.briefing_scheduler_embedded import (
+        start_embedded_briefing_scheduler,
+        stop_embedded_briefing_scheduler,
+    )
+
+    await start_embedded_briefing_scheduler()
+    try:
+        yield
+    finally:
+        await stop_embedded_briefing_scheduler()
+        await close_redis()
 
 
 app = FastAPI(

@@ -1,31 +1,62 @@
-# Run ON VPS: register primary + backup briefing tasks (09:00 and 09:15 local).
+# Run ON VPS: unattended briefing tasks (SYSTEM - no interactive logon required).
 $ErrorActionPreference = "Stop"
 $LogDir = "C:\logs\jcm"
-if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+$ScriptsDir = "C:\jcm\scripts"
+$Root = "C:\jcm-project"
 
-$primary = "C:\Users\Administrator\vps-send-briefing-telegram.ps1"
-$backup = "C:\Users\Administrator\vps-briefing-backup.ps1"
-foreach ($p in @($primary, $backup)) {
-    if (-not (Test-Path $p)) { throw "Missing $p - deploy scripts to VPS first" }
+if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
+if (-not (Test-Path $ScriptsDir)) { New-Item -ItemType Directory -Path $ScriptsDir -Force | Out-Null }
+
+$toCopy = @(
+    "vps-briefing-common.ps1",
+    "vps-send-briefing-telegram.ps1",
+    "vps-briefing-backup.ps1",
+    "vps-briefing-startup-catchup.ps1",
+    "run-briefing-primary.bat",
+    "run-briefing-backup.bat",
+    "run-briefing-startup-catchup.bat"
+)
+foreach ($f in $toCopy) {
+    $src = Join-Path $Root "scripts\$f"
+    if (-not (Test-Path $src)) { $src = "C:\Users\Administrator\$f" }
+    if (-not (Test-Path $src)) { throw "Missing $f" }
+    Copy-Item $src (Join-Path $ScriptsDir $f) -Force
+    Copy-Item $src "C:\Users\Administrator\$f" -Force
 }
 
-function Register-DailyTask($name, $time, $script) {
+# SYSTEM must read .env and write logs
+if (Test-Path "$Root\.env") {
+    icacls "$Root\.env" /grant "NT AUTHORITY\SYSTEM:(R)" /Q 2>$null | Out-Null
+}
+icacls $LogDir /grant "NT AUTHORITY\SYSTEM:(M)" /Q 2>$null | Out-Null
+icacls "$Root\backend\.venv" /grant "NT AUTHORITY\SYSTEM:(OI)(CI)RX" /T /Q 2>$null | Out-Null
+icacls $ScriptsDir /grant "NT AUTHORITY\SYSTEM:(OI)(CI)RX" /T /Q 2>$null | Out-Null
+
+function Register-DailyTaskSystem($name, $time, $batName) {
+    $bat = Join-Path $ScriptsDir $batName
     cmd /c "schtasks /End /TN `"$name`" 2>nul"
     cmd /c "schtasks /Delete /TN `"$name`" /F 2>nul"
-    $tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`""
-    $null = schtasks /Create /TN $name /TR $tr /SC DAILY /ST $time /RU Administrator /RL HIGHEST /F 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        schtasks /Create /TN $name /TR $tr /SC DAILY /ST $time /RL HIGHEST /F | Out-Null
-    }
+    $tr = "cmd.exe /c `"$bat`""
+    schtasks /Create /TN $name /TR $tr /SC DAILY /ST $time /RU SYSTEM /RL HIGHEST /F | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Failed to create task $name" }
-    Write-Host "Registered $name at $time"
+    Write-Host "Registered $name at $time (SYSTEM via $batName)"
 }
 
-Register-DailyTask "JCM-Daily-Executive-Briefing" "09:00" $primary
-Register-DailyTask "JCM-Briefing-Telegram-Backup" "09:15" $backup
+function Register-OnStartTaskSystem($name, $batName) {
+    $bat = Join-Path $ScriptsDir $batName
+    cmd /c "schtasks /End /TN `"$name`" 2>nul"
+    cmd /c "schtasks /Delete /TN `"$name`" /F 2>nul"
+    $tr = "cmd.exe /c `"$bat`""
+    schtasks /Create /TN $name /TR $tr /SC ONSTART /RU SYSTEM /RL HIGHEST /F | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Failed to create task $name" }
+    Write-Host "Registered $name ONSTART (SYSTEM via $batName)"
+}
+
+Register-DailyTaskSystem "JCM-Daily-Executive-Briefing" "09:00" "run-briefing-primary.bat"
+Register-DailyTaskSystem "JCM-Briefing-Telegram-Backup" "09:15" "run-briefing-backup.bat"
+Register-OnStartTaskSystem "JCM-Briefing-Startup-Catchup" "run-briefing-startup-catchup.bat"
 
 Write-Host ""
-Write-Host "Briefing pipeline tasks:"
-schtasks /Query /TN JCM-Daily-Executive-Briefing /FO LIST | findstr /I "TaskName Status Next"
-schtasks /Query /TN JCM-Briefing-Telegram-Backup /FO LIST | findstr /I "TaskName Status Next"
+schtasks /Query /TN JCM-Daily-Executive-Briefing /V /FO LIST | findstr /I "TaskName Run As Last Run Next Logon"
+schtasks /Query /TN JCM-Briefing-Telegram-Backup /V /FO LIST | findstr /I "TaskName Run As Last Run Next Logon"
 Write-Host "Logs: $LogDir\daily-briefing-telegram.log"

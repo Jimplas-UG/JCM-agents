@@ -31,6 +31,10 @@ def _delivery_key(day: date) -> str:
     return f"{DELIVERY_KEY_PREFIX}:{day.isoformat()}"
 
 
+async def get_delivery_record(day: date | None = None) -> dict[str, Any] | None:
+    return await _load_delivery_record(day or date.today())
+
+
 async def _load_delivery_record(day: date) -> dict[str, Any] | None:
     raw = await cache_get(_delivery_key(day))
     if not raw:

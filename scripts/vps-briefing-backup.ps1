@@ -1,21 +1,12 @@
-# Backup: send briefing only if today's Telegram delivery was not recorded.
+# Backup: send only if today's Telegram delivery not recorded (09:15 daily).
 $ErrorActionPreference = "Stop"
-$LogDir = "C:\logs\jcm"
-$LogFile = Join-Path $LogDir "daily-briefing-telegram.log"
-function Write-Log($msg) {
-    $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [backup] $msg"
-    Add-Content -Path $LogFile -Value $line
-    Write-Host $line
-}
-
-$Root = "C:\jcm-project"
-if (-not (Test-Path "$Root\backend\.venv\Scripts\python.exe")) {
-    $Root = "C:\Users\Administrator\Documents\JCM agents\JCM-agents"
-}
-$Backend = "$Root\backend"
-$Py = "$Backend\.venv\Scripts\python.exe"
-Copy-Item "$Root\.env" "$Backend\.env" -Force
-Set-Location $Backend
-Write-Log "daily_briefing_job --ensure"
-& $Py -m app.workers.daily_briefing_job --ensure
-exit $LASTEXITCODE
+$common = Join-Path $PSScriptRoot "vps-briefing-common.ps1"
+if (-not (Test-Path $common)) { $common = "C:\jcm\scripts\vps-briefing-common.ps1" }
+. $common
+Initialize-JcmBriefingRuntime
+Write-JcmBriefingLog "daily_briefing_job --ensure" "backup"
+& $script:JcmBriefingPy -m app.workers.daily_briefing_job --ensure
+$code = $LASTEXITCODE
+if ($code -eq 0) { Write-JcmBriefingLog "SUCCESS: backup completed" "backup" }
+else { Write-JcmBriefingLog "ERROR: exit $code" "backup" }
+exit $code
