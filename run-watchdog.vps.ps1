@@ -10,26 +10,20 @@ if (-not (Test-Path $helper)) { $helper = 'C:\jcm-project\scripts\vps-tsx-worker
 if (Test-Path $helper) { . $helper }
 
 $Backend = Join-Path $AppDir 'backend'
+$Deploy = Join-Path $AppDir 'deploy'
 $LogDir = $env:TRADINGBOT_LOG_DIR
 if (-not $LogDir) { $LogDir = 'C:\logs\tradingbot' }
-$ErrLog = Join-Path $LogDir 'forward-bot.err.log'
-$OutLog = Join-Path $LogDir 'forward-bot.out.log'
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
-$marker = 'run-forward-demo-30d'
+$marker = 'watchdog\.ts'
 if (Test-TsxWorkerRunning $marker) {
     Stop-TsxWorkerDuplicates $marker | Out-Null
     $leaves = Get-TsxWorkerLeaves $marker
-    Write-Host 'Forward bot already active PID' $leaves[0].ProcessId
+    Write-Host 'Watchdog already active PID' $leaves[0].ProcessId
     exit 0
 }
 
 Set-Location $Backend
-$env:PRODUCTION_MODE = '1'
-$env:PRODUCTION_NO_EXPIRY = '1'
-$env:STRATEGY_FREEZE = '1'
-$env:RISK_PCT = '0.01'
-
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = 'node.exe' }
 $tsxCli = Join-Path $Backend 'node_modules\tsx\dist\cli.mjs'
@@ -38,29 +32,37 @@ if (-not (Test-Path $tsxCli)) {
     exit 1
 }
 
-$tsxArgs = @($tsxCli, 'scripts/run-forward-demo-30d.ts')
+$watchdogScript = Join-Path $Deploy 'watchdog.ts'
+if (-not (Test-Path $watchdogScript)) {
+    $watchdogScript = 'C:\jcm-project\watchdog.vps.ts'
+}
+if (-not (Test-Path $watchdogScript)) {
+    Write-Host "FAIL: watchdog script missing"
+    exit 1
+}
+
+$tsxArgs = @($tsxCli, $watchdogScript)
 Start-Process -FilePath $node `
     -ArgumentList $tsxArgs `
     -WorkingDirectory $Backend `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput $OutLog `
-    -RedirectStandardError $ErrLog
-Start-Sleep -Seconds 15
+    -WindowStyle Hidden
+Start-Sleep -Seconds 10
 if (Test-TsxWorkerRunning $marker) {
-    Write-Host 'Started forward bot'
+    Write-Host 'Started watchdog'
     exit 0
 }
 $pcount = Get-TsxWorkerNodeCount $marker
 if ($pcount -ge 2) {
-    Write-Host 'Started forward bot (tsx parent+child)'
+    Write-Host 'Started watchdog (tsx parent+child)'
     exit 0
 }
-if (Test-Path $ErrLog) {
-    $age = ((Get-Date) - (Get-Item $ErrLog).LastWriteTime).TotalSeconds
+$wdLog = Join-Path $LogDir 'watchdog.log'
+if (Test-Path $wdLog) {
+    $age = ((Get-Date) - (Get-Item $wdLog).LastWriteTime).TotalSeconds
     if ($age -lt 45) {
-        Write-Host 'Started forward bot (log active)'
+        Write-Host 'Started watchdog (log active)'
         exit 0
     }
 }
-Write-Host 'FAIL: forward bot did not stay up — check forward-bot.err.log'
+Write-Host 'FAIL: watchdog did not stay up — check watchdog.log'
 exit 1

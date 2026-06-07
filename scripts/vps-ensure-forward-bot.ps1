@@ -1,8 +1,11 @@
-# Ensure forward bot + execution stack running - does NOT modify strategy code
+# Ensure forward bot + execution stack + executive briefing — does NOT modify strategy code
 $ErrorActionPreference = "Continue"
 $LogDir = "C:\logs\tradingbot"
 $ef = "C:\ProgramData\Bilshenz\tradingbot.env"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+$tsxHelper = "C:\jcm-project\scripts\vps-tsx-worker.ps1"
+if (Test-Path $tsxHelper) { . $tsxHelper }
 
 function Log($m) {
     $l = "[$(Get-Date -Format HH:mm:ss)] $m"
@@ -45,11 +48,32 @@ if ((Test-Path $vt) -and -not (Test-Path $vj)) {
     Log "Linked scripts/validation -> validation"
 }
 $fwdLauncher = "C:\opt\bilshenz\deploy\windows\run-forward-bot.ps1"
+$wdLauncher = "C:\opt\bilshenz\deploy\windows\run-watchdog.ps1"
 $repoLauncher = "C:\jcm-project\run-forward-bot.vps.ps1"
+$repoWatchdog = "C:\jcm-project\run-watchdog.vps.ps1"
 if (Test-Path $repoLauncher) {
     Copy-Item $repoLauncher $fwdLauncher -Force
     Log "Synced run-forward-bot.ps1 from jcm-project"
-} elseif (Test-Path $fwdLauncher) {
+}
+if (Test-Path $repoWatchdog) {
+    Copy-Item $repoWatchdog $wdLauncher -Force
+    Log "Synced run-watchdog.ps1 from jcm-project"
+}
+$tsxSrc = "C:\jcm-project\scripts\vps-tsx-worker.ps1"
+if (Test-Path $tsxSrc) {
+    Copy-Item $tsxSrc "C:\jcm\scripts\vps-tsx-worker.ps1" -Force -EA SilentlyContinue
+    Copy-Item $tsxSrc "C:\opt\bilshenz\deploy\windows\vps-tsx-worker.ps1" -Force -EA SilentlyContinue
+}
+$wdDeploy = "C:\opt\bilshenz\deploy\watchdog.ts"
+$wdRepo = "C:\jcm-project\watchdog.vps.ts"
+if ((Test-Path $wdRepo) -and -not (Test-Path $wdDeploy)) {
+    Copy-Item $wdRepo $wdDeploy -Force
+    Log "Synced deploy/watchdog.ts from jcm-project"
+} elseif ((Test-Path $wdRepo)) {
+    Copy-Item $wdRepo $wdDeploy -Force
+    Log "Updated deploy/watchdog.ts from jcm-project"
+}
+if (-not (Test-Path $repoLauncher) -and (Test-Path $fwdLauncher)) {
     $raw = Get-Content $fwdLauncher -Raw
     $raw = $raw -replace 'scripts/scripts/run-forward-demo-30d\.ts', 'scripts/run-forward-demo-30d.ts'
     $raw = $raw -replace '(?s)function Test-ForwardAlive \{.*?\n\}', @'
@@ -106,34 +130,72 @@ try {
     Log "MT5 reconnect skipped: $($_.Exception.Message)"
 }
 
-# 5. Forward bot - single worker only
-$fwdProcs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.Name -eq 'node.exe' -and $_.CommandLine -match "run-forward-demo-30d"
-})
-if ($fwdProcs.Count -gt 1) {
-    $keep = $fwdProcs[-1].ProcessId
-    foreach ($p in $fwdProcs[0..($fwdProcs.Count-2)]) {
-        Log "Killing duplicate forward PID $($p.ProcessId)"
-        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+# 5. Forward bot — never re-run launcher if leaf worker alive (tsx = 2 node PIDs)
+$fwdMarker = 'run-forward-demo-30d'
+$fwdRunning = $false
+if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) {
+    $fwdRunning = Test-TsxWorkerRunning $fwdMarker
+    if ($fwdRunning) { Stop-TsxWorkerDuplicates $fwdMarker | Out-Null }
+} else {
+    $fwdProcs = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -eq 'node.exe' -and $_.CommandLine -match $fwdMarker
+    })
+    $fwdRunning = $fwdProcs.Count -ge 2
+}
+if (-not $fwdRunning) {
+    Log "Forward bot not running - starting via launcher"
+    if (Test-Path $fwdLauncher) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $fwdLauncher -AppDir "C:\opt\bilshenz" 2>&1 | ForEach-Object { Log $_ }
+        Start-Sleep -Seconds 12
+    } else {
+        Run-TaskIfExists "Bilshenz-ForwardBot-Sys" | Out-Null
+        Start-Sleep -Seconds 20
+    }
+} else {
+    $leaves = if (Get-Command Get-TsxWorkerLeaves -EA SilentlyContinue) { Get-TsxWorkerLeaves $fwdMarker } else { @() }
+    if ($leaves.Count -gt 1) {
+        Log "WARN: $($leaves.Count) forward workers - restarting single instance"
+        Stop-TsxWorkerAll $fwdMarker
+        Start-Sleep 3
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $fwdLauncher -AppDir "C:\opt\bilshenz" 2>&1 | ForEach-Object { Log $_ }
+    } else {
+        $n = if (Get-Command Get-TsxWorkerNodeCount -EA SilentlyContinue) { Get-TsxWorkerNodeCount $fwdMarker } else { 2 }
+        Log "Forward bot running ($n node PIDs, tsx parent+child)"
     }
 }
-if ($fwdProcs.Count -eq 0) {
-    Log "Forward bot not running - starting forward bot task"
-    if (-not (Run-TaskIfExists "Bilshenz-ForwardBot-Sys")) { Run-TaskIfExists "Bilshenz-ForwardBot" | Out-Null }
-    Start-Sleep -Seconds 20
+
+# 6. Bilshenz watchdog
+$wdMarker = 'watchdog\.ts'
+$wdRunning = $false
+if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) {
+    $wdRunning = Test-TsxWorkerRunning $wdMarker
+    if ($wdRunning) { Stop-TsxWorkerDuplicates $wdMarker | Out-Null }
 } else {
-    Log "Forward bot running PID $($fwdProcs[0].ProcessId)"
+    $wdRunning = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.CommandLine -match $wdMarker
+    }).Count -ge 2
+}
+if (-not $wdRunning) {
+    Log "Watchdog not running - starting via launcher"
+    if (Test-Path $wdLauncher) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $wdLauncher -AppDir "C:\opt\bilshenz" 2>&1 | ForEach-Object { Log $_ }
+        Start-Sleep -Seconds 10
+    } else {
+        Run-TaskIfExists "Bilshenz-Watchdog-Sys" | Out-Null
+        Start-Sleep -Seconds 12
+    }
+} else {
+    Log "Watchdog running"
 }
 
-# 6. Bilshenz watchdog (production - polls MT5/desk/forward)
-$wdTask = Get-ScheduledTask -TaskName "Bilshenz-Watchdog" -ErrorAction SilentlyContinue
-if ($wdTask -and $wdTask.State -ne "Running") {
-    schtasks /Run /TN "Bilshenz-Watchdog" 2>&1 | Out-Null
-    Log "Started Bilshenz-Watchdog"
+# 7. JCM observability (sidecars only - not trading) — quick, non-blocking
+if (Test-Path "C:\Users\Administrator\start-sidecars.ps1") {
+    Start-Process powershell.exe -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', 'C:\Users\Administrator\start-sidecars.ps1'
+    ) -WindowStyle Hidden
+    Log "Spawned sidecars check (background)"
 }
-
-# 7. JCM observability (sidecars only - not trading)
-& "C:\Users\Administrator\start-sidecars.ps1" 2>&1 | ForEach-Object { Log $_ }
 
 # 8. Clear failsafe if MT5 healthy
 Start-Sleep -Seconds 5
@@ -160,10 +222,13 @@ try {
     }
 } catch { Log "MT5 check skipped: $($_.Exception.Message)" }
 
-# 9. JCM 9-agent scheduler (Mission Control data freshness)
+# 9. JCM 9-agent scheduler (Mission Control data freshness) — background
 $agentStarter = "C:\jcm-project\scripts\vps-start-agent-scheduler.ps1"
 if (Test-Path $agentStarter) {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $agentStarter 2>&1 | ForEach-Object { Log $_ }
+    Start-Process powershell.exe -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $agentStarter
+    ) -WindowStyle Hidden
+    Log "Spawned agent scheduler check (background)"
 }
 
 # 10. Allocator pipeline (backfill + tear sheet) — daily
@@ -178,8 +243,11 @@ if (Test-Path $allocatorScript) {
     }
 }
 if ($runAllocator) {
-    Log "Running allocator pipeline (backfill + gates)..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $allocatorScript 2>&1 | ForEach-Object { Log $_ }
+    Log "Spawning allocator pipeline (background)..."
+    Start-Process powershell.exe -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', $allocatorScript
+    ) -WindowStyle Hidden
     New-Item -ItemType File -Force -Path $allocatorMarker | Out-Null
 }
 
@@ -211,9 +279,52 @@ if (Test-Path $readinessScript) {
     }
 }
 if ($runReadiness) {
-    Log "Running daily institutional readiness report..."
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $readinessScript 2>&1 | ForEach-Object { Log $_ }
+    Log "Spawning institutional readiness report (background)..."
+    Start-Process powershell.exe -ArgumentList @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', $readinessScript
+    ) -WindowStyle Hidden
     New-Item -ItemType File -Force -Path $readinessMarker | Out-Null
+}
+
+# 13. Executive briefing (JCMAPI embedded scheduler + catchup)
+$nssm = "C:\jcm\nssm\nssm.exe"
+if (Test-Path $nssm) {
+    try {
+        $apiSt = (& $nssm status JCMAPI 2>&1 | Out-String).Trim()
+        if ($apiSt -notmatch 'SERVICE_RUNNING') {
+            Log "JCMAPI down ($apiSt) - restarting"
+            & $nssm restart JCMAPI confirm 2>&1 | ForEach-Object { Log $_ }
+            Start-Sleep -Seconds 15
+        } else {
+            Log "JCMAPI running"
+        }
+    } catch { Log "JCMAPI check skipped: $($_.Exception.Message)" }
+}
+
+$briefCatchup = "C:\jcm\scripts\vps-briefing-startup-catchup.ps1"
+if (-not (Test-Path $briefCatchup)) { $briefCatchup = "C:\jcm-project\scripts\vps-briefing-startup-catchup.ps1" }
+if (Test-Path $briefCatchup) {
+    try {
+        $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById("E. Africa Standard Time")
+        $nowK = [System.TimeZoneInfo]::ConvertTimeFromUtc((Get-Date).ToUniversalTime(), $tz)
+        $todayK = $nowK.ToString("yyyy-MM-dd")
+        if ($nowK.Hour -ge 9) {
+            $briefLog = "C:\logs\jcm\daily-briefing-telegram.log"
+            $sentToday = $false
+            if (Test-Path $briefLog) {
+                $sentToday = Select-String -Path $briefLog -Pattern "$todayK.*SUCCESS" -Quiet -EA SilentlyContinue
+            }
+            if (-not $sentToday) {
+                Log "Executive briefing not sent for $todayK (Kampala) - spawning catchup (background)"
+                Start-Process powershell.exe -ArgumentList @(
+                    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $briefCatchup
+                ) -WindowStyle Hidden
+            } else {
+                Log "Executive briefing sent today ($todayK)"
+            }
+        }
+    } catch { Log "Briefing ensure skipped: $($_.Exception.Message)" }
 }
 
 # 12. Health summary
@@ -223,9 +334,21 @@ try {
     Log "Tick age OK symbol=XAUUSD"
 } catch { Log "Tick check failed" }
 
-$fwd2 = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.CommandLine -match "run-forward-demo"
+$fwd2 = if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) {
+    if (Test-TsxWorkerRunning 'run-forward-demo-30d') { Get-TsxWorkerNodeCount 'run-forward-demo-30d' } else { 0 }
+} else {
+    @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "run-forward-demo" }).Count
 }
-Log "Forward process count: $($fwd2.Count)"
+$wd2 = if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) {
+    if (Test-TsxWorkerRunning 'watchdog\.ts') { Get-TsxWorkerNodeCount 'watchdog\.ts' } else { 0 }
+} else {
+    @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match "watchdog\.ts" }).Count
+}
+Log "Forward: $(if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) { Test-TsxWorkerRunning 'run-forward-demo-30d' } else { $fwd2 -ge 2 }) ($fwd2 node PIDs)"
+Log "Watchdog: $(if (Get-Command Test-TsxWorkerRunning -EA SilentlyContinue) { Test-TsxWorkerRunning 'watchdog\.ts' } else { $wd2 -ge 2 }) ($wd2 node PIDs)"
+if (Test-Path "C:\logs\tradingbot\watchdog.log") {
+    $wdAge = ((Get-Date) - (Get-Item "C:\logs\tradingbot\watchdog.log").LastWriteTime).TotalMinutes
+    Log ("Watchdog log age min: {0:N1}" -f $wdAge)
+}
 Log "FORWARD_DRY_RUN=$($env:FORWARD_DRY_RUN) PRODUCTION_MODE=$($env:PRODUCTION_MODE)"
 Log "=== DONE ==="

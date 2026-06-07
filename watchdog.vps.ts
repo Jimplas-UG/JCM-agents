@@ -231,17 +231,25 @@ async function tick(): Promise<void> {
       }
     } else {
       mt5DownCount = 0;
-      staleTickCount++;
-      if (prevMt5 && staleTickCount === 1) {
-        logReconnect('mt5 tick feed stale', {
-          service: 'mt5-tick',
-          tick_age_sec: tick.ageSec,
-          symbol: SYMBOL,
-        });
-        log(`MT5 tick STALE (${tick.ageSec}s): ${tick.detail}`);
-      }
-      if (staleTickCount >= RESTART_AFTER) {
-        restartMt5FullStack(`stale tick feed ${tick.ageSec}s for ${RESTART_AFTER} checks`);
+      // Weekend/holiday: tick frozen for hours — do not restart MT5 stack
+      if (tick.ageSec > 7200) {
+        if (staleTickCount > 0) {
+          log(`Market-closed tick age ${tick.ageSec}s — skipping stale restart`);
+        }
+        staleTickCount = 0;
+      } else {
+        staleTickCount++;
+        if (prevMt5 && staleTickCount === 1) {
+          logReconnect('mt5 tick feed stale', {
+            service: 'mt5-tick',
+            tick_age_sec: tick.ageSec,
+            symbol: SYMBOL,
+          });
+          log(`MT5 tick STALE (${tick.ageSec}s): ${tick.detail}`);
+        }
+        if (staleTickCount >= RESTART_AFTER) {
+          restartMt5FullStack(`stale tick feed ${tick.ageSec}s for ${RESTART_AFTER} checks`);
+        }
       }
     }
   } else {
@@ -274,7 +282,7 @@ async function tick(): Promise<void> {
   try {
     const botPids = runPs(
       "$p = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | " +
-      "Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo-30d' }; " +
+      "Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'loader\\.mjs.*run-forward-demo-30d' }; " +
       "if ($p) { ($p | Select-Object -ExpandProperty ProcessId) -join ',' }"
     );
     const ids = (botPids.match(/\d+/g) ?? []).map((x) => parseInt(x, 10)).filter((x) => x > 0);
@@ -282,14 +290,21 @@ async function tick(): Promise<void> {
     if (ids.length === 0 && !logFresh) {
       forwardMissingCount++;
       const taskState = runPs(
-        "(Get-ScheduledTask -TaskName 'Bilshenz-ForwardBot' -ErrorAction SilentlyContinue).State"
+        "$t = Get-ScheduledTask -TaskName 'Bilshenz-ForwardBot-Sys' -ErrorAction SilentlyContinue; " +
+        "if (-not $t) { $t = Get-ScheduledTask -TaskName 'Bilshenz-ForwardBot' -ErrorAction SilentlyContinue }; " +
+        "if ($t) { $t.State } else { 'Missing' }"
       );
       let logStale = true;
       try {
-        const logPath = path.join(LOG_DIR, 'forward-bot.log');
-        if (fs.existsSync(logPath)) {
-          logStale = Date.now() - fs.statSync(logPath).mtimeMs > 180_000;
+        const logNames = ['forward-bot.err.log', 'forward-bot.out.log', 'forward-bot.log'];
+        let newest = 0;
+        for (const name of logNames) {
+          const logPath = path.join(LOG_DIR, name);
+          if (fs.existsSync(logPath) && fs.statSync(logPath).size > 0) {
+            newest = Math.max(newest, fs.statSync(logPath).mtimeMs);
+          }
         }
+        if (newest > 0) logStale = Date.now() - newest > 180_000;
       } catch { /* ignore */ }
       const cooldownOk = Date.now() - lastForwardRestartMs > FORWARD_RESTART_COOLDOWN_MS;
       if (
@@ -298,30 +313,31 @@ async function tick(): Promise<void> {
         logStale &&
         cooldownOk
       ) {
-        log('Forward bot missing — starting Bilshenz-ForwardBot (after 3 checks + stale log)');
-        runPs("Start-ScheduledTask -TaskName 'Bilshenz-ForwardBot'");
+        log('Forward bot missing — starting Bilshenz-ForwardBot-Sys (after 3 checks + stale log)');
+        runPs(
+          "Start-ScheduledTask -TaskName 'Bilshenz-ForwardBot-Sys' -ErrorAction SilentlyContinue; " +
+          "if (-not $?) { Start-ScheduledTask -TaskName 'Bilshenz-ForwardBot' -ErrorAction SilentlyContinue }; " +
+          "Start-Sleep 15; " +
+          "$alive = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | " +
+          "Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'run-forward-demo-30d' }; " +
+          "if (-not $alive) { " +
+          "& 'C:\\opt\\bilshenz\\deploy\\windows\\run-forward-bot.ps1' -AppDir 'C:\\opt\\bilshenz' " +
+          "}"
+        );
         logReconnect('forward bot started by watchdog', { service: 'forward-bot' });
         lastForwardRestartMs = Date.now();
         forwardMissingCount = 0;
       }
     } else {
       forwardMissingCount = 0;
-      if (ids.length > 1) {
-        const keep = Math.max(...ids);
-        for (const pid of ids) {
-          if (pid === keep) continue;
-          log(`Killing duplicate forward bot PID ${pid} (keeping ${keep})`);
-          runPs(`Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`);
-        }
-      }
     }
   } catch { /* ignore */ }
 
   const ts = new Date().toISOString().slice(11, 19);
   const tickNote = mt5.ok && !tick.ok ? ` tick_age=${tick.ageSec}s` : '';
-  console.log(
-    `${ts} desk=${desk.ok} mt5=${mt5Healthy}${!mt5Healthy ? ' ' + (mt5.detail || tick.detail).slice(0, 80) : ''}${tickNote}`
-  );
+  const heartbeat = `${ts} desk=${desk.ok} mt5=${mt5Healthy}${!mt5Healthy ? ' ' + (mt5.detail || tick.detail).slice(0, 80) : ''}${tickNote}`;
+  console.log(heartbeat);
+  log(heartbeat);
 
   prevDesk = desk.ok;
   prevMt5 = mt5Healthy;
